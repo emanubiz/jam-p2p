@@ -64,7 +64,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: jam-gui
-        run: npm ci
+        run: npm install
 
       - name: Build Tauri app
         working-directory: jam-gui
