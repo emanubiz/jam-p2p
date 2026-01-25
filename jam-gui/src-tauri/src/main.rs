@@ -273,15 +273,25 @@ async fn handle_signal(
                 if let Ok(mut s) = m_inner.lock() { s.insert(p_inner.clone(), (cons, 1.0)); }
                 let mut dec = Decoder::new(sample_rate_track, Channels::Mono).unwrap();
                 let mut pcm = vec![0f32; samples_per_frame_track * 2];
+                let ema_alpha: f32 = 0.3;
+                let mut prev_level: f32 = 0.0f32;
                 while let Ok((rtp, _)) = track.read_rtp().await {
                     if let Ok(len) = dec.decode_float(&rtp.payload, &mut pcm, false) {
                         let samples = &pcm[..len];
                         // push decoded samples to mixing ringbuffer
                         let _ = prod.push_slice(samples);
-                        // compute peak level and emit to frontend
-                        let mut peak = 0.0f32;
-                        for &v in samples { let a = v.abs(); if a > peak { peak = a; } }
-                        let _ = h_emit.emit("peer-level", serde_json::json!({ "id": p_inner.clone(), "level": peak }));
+                        // compute RMS level and emit smoothed value (EMA)
+                        let mut sum_sq = 0.0f32;
+                        for &v in samples { sum_sq += v * v; }
+                        let rms = (sum_sq / (samples.len() as f32)).sqrt();
+                        // convert to dBFS and normalize: map [-60 dB .. 0 dB] -> [0 .. 1]
+                        let db = 20.0f32 * (rms.max(1e-12f32)).log10();
+                        let mut norm = (db + 60.0f32) / 60.0f32;
+                        if norm.is_nan() || norm.is_infinite() { norm = 0.0; }
+                        if norm < 0.0 { norm = 0.0; }
+                        if norm > 1.0 { norm = 1.0; }
+                        prev_level = ema_alpha * norm + (1.0 - ema_alpha) * prev_level;
+                        let _ = h_emit.emit("peer-level", serde_json::json!({ "id": p_inner.clone(), "level": prev_level }));
                     }
                 }
                 if let Ok(mut s) = m_inner.lock() { s.remove(&p_inner); }
