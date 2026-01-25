@@ -15,6 +15,42 @@ function App() {
 
   const { peers, addPeer, removePeer, setPeerVolume, setPeerLevel } = usePeers();
 
+  // start local mic capture and publish a local pseudo-peer for VM meter
+  useEffect(() => {
+    let running = true;
+    addPeer({ id: 'local', name: 'You', volume: 1.0, level: 0 });
+    async function startMic() {
+      if (!navigator || !navigator.mediaDevices) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const src = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        src.connect(analyser);
+        const data = new Float32Array(analyser.fftSize);
+        const tick = () => {
+          if (!running) return;
+          analyser.getFloatTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+          const rms = Math.sqrt(sum / data.length);
+          const db = 20 * Math.log10(Math.max(1e-12, rms));
+          let norm = (db + 60) / 60;
+          if (!isFinite(norm) || isNaN(norm)) norm = 0;
+          norm = Math.max(0, Math.min(1, norm));
+          setPeerLevel('local', norm);
+          requestAnimationFrame(tick);
+        };
+        tick();
+      } catch (e) {
+        console.warn('Microphone access denied or unavailable', e);
+      }
+    }
+    startMic();
+    return () => { running = false; };
+  }, [addPeer, setPeerLevel]);
+
   useEffect(() => {
     let unlisten: any;
     async function setup() {
@@ -152,19 +188,21 @@ function App() {
               ) : (
                 <div className="peers-list">
                   {peers.map(p => (
-                    <div key={p.id} className="peer-card">
+                    <div key={p.id} className={`peer-card ${p.id === 'local' ? 'local' : ''}`}>
                       <div className="peer-header">
                         <div className="peer-info">
-                          <div className="peer-avatar">🎵</div>
+                          <div className={`peer-avatar ${p.id === 'local' ? 'local' : ''}`}>{p.id === 'local' ? '🎤' : '🎵'}</div>
                           <div className="peer-details">
-                            <div className="peer-name">{p.name}</div>
-                            <div className="peer-id">{p.id.slice(0, 8)}</div>
+                            <div className="peer-name">{p.id === 'local' ? 'Local Mic' : p.name}</div>
+                            <div className="peer-id">{p.id === 'local' ? 'local' : p.id.slice(0, 8)}</div>
                           </div>
                         </div>
-                        <button 
-                          className="remove-btn"
-                          onClick={() => removePeer(p.id)}
-                        >×</button>
+                        {p.id !== 'local' ? (
+                          <button 
+                            className="remove-btn"
+                            onClick={() => removePeer(p.id)}
+                          >×</button>
+                        ) : null}
                       </div>
                       
                       <div className="volume-control">

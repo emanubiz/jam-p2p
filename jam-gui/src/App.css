@@ -377,6 +377,23 @@ body {
   background: rgba(9, 9, 11, 0.8);
 }
 
+/* Local mic highlight */
+.peer-card.local {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: linear-gradient(180deg, rgba(2,6,23,0.85), rgba(9,9,11,0.8));
+  box-shadow: 0 6px 20px rgba(59,130,246,0.06);
+}
+.peer-avatar.local {
+  background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+}
+.peer-name {
+  display: flex;
+  align-items: center;
+}
+.peer-name::after {
+  content: '';
+}
+
 .peer-header {
   display: flex;
   justify-content: space-between;
