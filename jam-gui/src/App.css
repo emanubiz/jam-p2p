@@ -1,0 +1,7 @@
+body { background-color: #222; color: white; font-family: sans-serif; display: flex; justify-content: center; height: 100vh; margin: 0; }
+.container { text-align: center; margin-top: 50px; }
+.card { display: flex; flex-direction: column; gap: 10px; background: #333; padding: 20px; border-radius: 8px; width: 300px; }
+input { padding: 8px; border-radius: 4px; border: none; }
+button { padding: 10px; background: #e056fd; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+button:hover { background: #be2edd; }
+.status { margin-top: 20px; font-size: 1.2rem; }
