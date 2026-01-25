@@ -25,7 +25,6 @@ npm install
 
 ```bash
 cd ../jam-signaler
-# Imposta una password stanza opzionale: ROOM_PASSWORD=secr3t
 node server.js
 ```
 
@@ -55,22 +54,3 @@ npm run build
 ```bash
 npm run tauri build
 ```
-
-Consigli di sicurezza e operativi
-- Configurare STUN/TURN: per connessioni fuori LAN è necessario un server STUN (es. `stun:stun.l.google.com:19302`) e per connessioni più affidabili usare TURN.
-- Impostare una password stanza (env `ROOM_PASSWORD`) per limitare l'accesso al signaling.
-- Abilitare logging strutturato (vedi `src-tauri/src/logger.rs`) e centralizzare i log in produzione.
-
-Contribuire
-- Aggiungere `LICENSE`, `CONTRIBUTING.md` e test prima di PR significative.
-
-Files principali
-- `jam-signaler/server.js` — signaling WebSocket con autenticazione stanza opzionale.
-- `jam-gui/src/App.tsx` — UI React aggiornata con lista peer e slider per volume per peer.
-- `src-tauri/src/main.rs` — runtime Rust: migliorata gestione errori e logging.
-
-Passi consigliati successivi
-- Aggiungere test unitari / e2e (playwright / vitest).
-- Fornire un TURN server o usare un provider (coturn, Twilio, Xirsys) in produzione.
-
-Per domande o se vuoi che applichi direttamente i cambi nel repo, dimmi quali file vuoi che modifichi per primi.
