@@ -13,7 +13,7 @@ function App() {
   const [status, setStatus] = useState<"idle" | "joining" | "connected" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const { peers, addPeer, removePeer, setPeerVolume } = usePeers();
+  const { peers, addPeer, removePeer, setPeerVolume, setPeerLevel } = usePeers();
 
   useEffect(() => {
     let unlisten: any;
@@ -22,8 +22,13 @@ function App() {
         addPeer({ 
           id: event.payload, 
           name: `Musician ${event.payload.slice(0, 4)}`, 
-          volume: 1.0 
+          volume: 1.0,
+          level: 0
         });
+      });
+      // listen for per-peer level (VM meter) updates from backend
+      await listen<{ id: string; level: number }>("peer-level", (ev) => {
+        setPeerLevel(ev.payload.id, ev.payload.level);
       });
     }
     setup();
@@ -185,7 +190,7 @@ function App() {
                         {[...Array(20)].map((_, i) => (
                           <div 
                             key={i} 
-                            className={`level-bar ${i < p.volume * 20 ? i < 14 ? 'green' : i < 18 ? 'yellow' : 'red' : ''}`}
+                            className={`level-bar ${i < (p.level ?? 0) * 20 ? i < 14 ? 'green' : i < 18 ? 'yellow' : 'red' : ''}`}
                           />
                         ))}
                       </div>

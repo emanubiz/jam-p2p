@@ -10,6 +10,7 @@ use ringbuf::{
     traits::{Consumer, Producer, Split},
     HeapCons, HeapRb,
 };
+use serde_json;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -27,9 +28,7 @@ use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
 
 use crate::logger::init_tracing;
 
-const SAMPLE_RATE: u32 = 48000;
 const FRAME_SIZE_MS: usize = 20;
-const SAMPLES_PER_FRAME: usize = (SAMPLE_RATE as usize * FRAME_SIZE_MS) / 1000;
 
 type MixerMap = HashMap<String, (HeapCons<f32>, f32)>;
 
@@ -107,21 +106,47 @@ async fn run_backend_loop(rx: &mut mpsc::UnboundedReceiver<AppCommand>, handle: 
     let config_in: cpal::StreamConfig = input_dev.default_input_config()?.into();
     let config_out: cpal::StreamConfig = output_dev.default_output_config()?.into();
 
-    let rb_mic = HeapRb::<f32>::new((SAMPLE_RATE as usize).max(1024));
+    // derive sample rate and channels from device config
+    let sample_rate: u32 = config_in.sample_rate.0;
+    let in_channels: usize = config_in.channels as usize;
+    let out_channels: usize = config_out.channels as usize;
+    let samples_per_frame: usize = (sample_rate as usize * FRAME_SIZE_MS) / 1000;
+
+    let rb_mic = HeapRb::<f32>::new((sample_rate as usize).max(1024));
     let (mut mic_prod, mut mic_cons) = rb_mic.split();
     let mixer_sources: Arc<Mutex<MixerMap>> = Arc::new(Mutex::new(HashMap::new()));
     let mixer_injector = mixer_sources.clone();
 
-    let input_stream = input_dev.build_input_stream(&config_in, move |data: &[f32], _| { let _ = mic_prod.push_slice(data); }, |_| {}, None)?;
+    let input_stream = input_dev.build_input_stream(&config_in, move |data: &[f32], _| {
+        if in_channels == 1 {
+            let _ = mic_prod.push_slice(data);
+        } else {
+            let mut mono: Vec<f32> = Vec::with_capacity(data.len() / in_channels);
+            for chunk in data.chunks(in_channels) {
+                let mut s = 0.0f32;
+                for &c in chunk { s += c; }
+                mono.push(s / (in_channels as f32));
+            }
+            let _ = mic_prod.push_slice(&mono);
+        }
+    }, |_| {}, None)?;
     let mixer_lock = mixer_sources.clone();
     let output_stream = output_dev.build_output_stream(&config_out, move |data: &mut [f32], _| {
+        // data is interleaved frames for out_channels
         data.fill(0.0);
+        let frames = if out_channels > 0 { data.len() / out_channels } else { 0 };
         if let Ok(mut sources) = mixer_lock.lock() {
-            for (_, (consumer, vol)) in sources.iter_mut() {
-                for sample in data.iter_mut() { if let Some(s) = consumer.try_pop() { *sample += s * (*vol); } }
+            for frame in 0..frames {
+                let mut mixed = 0.0f32;
+                for (_, (consumer, vol)) in sources.iter_mut() {
+                    if let Some(s) = consumer.try_pop() { mixed += s * (*vol); }
+                }
+                let m = mixed.tanh();
+                for ch in 0..out_channels {
+                    data[frame * out_channels + ch] = m;
+                }
             }
         }
-        for s in data.iter_mut() { *s = s.tanh(); }
     }, |_| {}, None)?;
 
     input_stream.play()?;
@@ -134,16 +159,17 @@ async fn run_backend_loop(rx: &mut mpsc::UnboundedReceiver<AppCommand>, handle: 
     let local_track = Arc::new(TrackLocalStaticRTP::new(RTCRtpCodecCapability { mime_type: "audio/opus".to_owned(), ..Default::default() }, "audio".to_owned(), "webrtc-rs".to_owned()));
 
     let track_clone = local_track.clone();
+    let sample_rate_clone = sample_rate;
     thread::spawn(move || {
-        let mut encoder = Encoder::new(SAMPLE_RATE, Channels::Mono, Application::Voip).unwrap();
-        let mut pcm_buf = Vec::with_capacity(SAMPLES_PER_FRAME);
+        let mut encoder = Encoder::new(sample_rate_clone, Channels::Mono, Application::Voip).unwrap();
+        let mut pcm_buf = Vec::with_capacity(samples_per_frame);
         let mut out_buf = [0u8; 1024];
         let mut seq: u16 = 0;
         loop {
-            while pcm_buf.len() < SAMPLES_PER_FRAME { if let Some(s) = mic_cons.try_pop() { pcm_buf.push(s); } else { thread::sleep(std::time::Duration::from_millis(2)); } }
+            while pcm_buf.len() < samples_per_frame { if let Some(s) = mic_cons.try_pop() { pcm_buf.push(s); } else { thread::sleep(std::time::Duration::from_millis(2)); } }
             if let Ok(len) = encoder.encode_float(&pcm_buf, &mut out_buf) {
                 let _ = track_clone.write_rtp(&webrtc::rtp::packet::Packet {
-                    header: webrtc::rtp::header::Header { payload_type: 111, sequence_number: seq, timestamp: seq as u32 * SAMPLES_PER_FRAME as u32, ..Default::default() },
+                    header: webrtc::rtp::header::Header { payload_type: 111, sequence_number: seq, timestamp: seq as u32 * samples_per_frame as u32, ..Default::default() },
                     payload: bytes::Bytes::copy_from_slice(&out_buf[..len]),
                 });
                 seq = seq.wrapping_add(1);
@@ -198,7 +224,7 @@ async fn run_backend_loop(rx: &mut mpsc::UnboundedReceiver<AppCommand>, handle: 
             }
             Some(text) = ws_in_rx.recv() => {
                 if let Ok(signal) = serde_json::from_str::<SignalMessage>(&text) {
-                    handle_signal(signal, &mut peers, &mut my_id, local_track.clone(), sig_tx.clone(), mixer_injector.clone(), &api, ice_servers.clone(), handle.clone()).await?;
+                    handle_signal(signal, &mut peers, &mut my_id, local_track.clone(), sig_tx.clone(), mixer_injector.clone(), &api, ice_servers.clone(), handle.clone(), sample_rate, samples_per_frame).await?;
                 }
             }
         }
@@ -215,6 +241,8 @@ async fn handle_signal(
     api: &Arc<webrtc::api::API>,
     ice_servers: Vec<RTCIceServer>,
     handle: tauri::AppHandle,
+    sample_rate: u32,
+    samples_per_frame: usize,
 ) -> Result<()> {
     
     let create_pc = |pid: String, sig_tx: mpsc::UnboundedSender<SignalMessage>, local_track: Arc<TrackLocalStaticRTP>, mixer: Arc<Mutex<MixerMap>>, api: Arc<webrtc::api::API>, ice_servers: Vec<RTCIceServer>, h: tauri::AppHandle| async move {
@@ -223,26 +251,38 @@ async fn handle_signal(
         let track_auth = local_track as Arc<dyn TrackLocal + Send + Sync>;
         pc.add_track(track_auth).await?;
 
-        let h_state = h.clone();
+        let h_state_pc = h.clone();
         let p_state = pid.clone();
         pc.on_peer_connection_state_change(Box::new(move |s| {
             if s == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
-                let _ = h_state.emit("peer-joined", p_state.clone());
+                let _ = h_state_pc.emit("peer-joined", p_state.clone());
             }
             Box::pin(async move {})
         }));
 
         let m = mixer.clone(); let p_id = pid.clone();
+        let sample_rate_track = sample_rate;
+        let samples_per_frame_track = samples_per_frame;
+        let h_state_track = h.clone();
         pc.on_track(Box::new(move |track, _, _| {
             let m_inner = m.clone(); let p_inner = p_id.clone();
+            let h_emit = h_state_track.clone();
             Box::pin(async move {
-                let rb = HeapRb::<f32>::new(SAMPLE_RATE as usize * 2);
+                let rb = HeapRb::<f32>::new(sample_rate_track as usize * 2);
                 let (mut prod, cons) = rb.split();
                 if let Ok(mut s) = m_inner.lock() { s.insert(p_inner.clone(), (cons, 1.0)); }
-                let mut dec = Decoder::new(SAMPLE_RATE, Channels::Mono).unwrap();
-                let mut pcm = vec![0f32; 1920];
+                let mut dec = Decoder::new(sample_rate_track, Channels::Mono).unwrap();
+                let mut pcm = vec![0f32; samples_per_frame_track * 2];
                 while let Ok((rtp, _)) = track.read_rtp().await {
-                    if let Ok(len) = dec.decode_float(&rtp.payload, &mut pcm, false) { let _ = prod.push_slice(&pcm[..len]); }
+                    if let Ok(len) = dec.decode_float(&rtp.payload, &mut pcm, false) {
+                        let samples = &pcm[..len];
+                        // push decoded samples to mixing ringbuffer
+                        let _ = prod.push_slice(samples);
+                        // compute peak level and emit to frontend
+                        let mut peak = 0.0f32;
+                        for &v in samples { let a = v.abs(); if a > peak { peak = a; } }
+                        let _ = h_emit.emit("peer-level", serde_json::json!({ "id": p_inner.clone(), "level": peak }));
+                    }
                 }
                 if let Ok(mut s) = m_inner.lock() { s.remove(&p_inner); }
             })
