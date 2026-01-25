@@ -7,7 +7,7 @@ export function usePeers() {
   const addPeer = useCallback((p: Peer) => {
     setPeers(prev => {
       if (prev.find(x => x.id === p.id)) return prev;
-      return [...prev, p];
+      return [...prev, { ...p, level: p.level ?? 0 }];
     });
   }, []);
 
@@ -19,5 +19,9 @@ export function usePeers() {
     setPeers(prev => prev.map(p => p.id === id ? { ...p, volume } : p));
   }, []);
 
-  return { peers, addPeer, removePeer, setPeerVolume } as const;
+  const setPeerLevel = useCallback((id: string, level: number) => {
+    setPeers(prev => prev.map(p => p.id === id ? { ...p, level } : p));
+  }, []);
+
+  return { peers, addPeer, removePeer, setPeerVolume, setPeerLevel } as const;
 }
