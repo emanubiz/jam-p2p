@@ -1,3 +1,4 @@
+
 // App.tsx
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -7,7 +8,7 @@ import { usePeers } from "./hooks/usePeers";
 
 function App() {
   const [room, setRoom] = useState("studio1");
-  const [name, setName] = useState(() => "player" + Math.floor(Math.random() * 100));
+  const [name] = useState(() => "player" + Math.floor(Math.random() * 100));
   const [server, setServer] = useState("ws://localhost:8080");
   const [status, setStatus] = useState<"idle" | "joining" | "connected" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
