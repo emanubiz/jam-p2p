@@ -1,17 +1,22 @@
 {
   "name": "jam-signaler",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "WebRTC signaling server for Jam P2P",
+  "main": "server.js",
+  "type": "commonjs",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "build": "ncc build server.js -o dist"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "ws": "^8.19.0",
     "pino": "^8.20.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.1"
   }
 }
