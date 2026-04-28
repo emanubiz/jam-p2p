@@ -282,10 +282,10 @@ testThreePeerMesh().catch(console.error);
 | TC-01 | 2026-04-28 | ✓ PASS | Automated test passed - 3 peers join, get correct PeerList and NewPeer notifications |
 | TC-02 | 2026-04-28 | ✓ PASS | Automated test passed - Offer/Answer/Ice messages correctly routed between all peers |
 | TC-03 | 2026-04-28 | ✓ PASS | Automated test passed - Clean disconnect handling, remaining peers stay connected |
-| TC-04 | ⏳ | Pending | Requires Tauri app or browser instances |
-| TC-05 | ⏳ | Pending | Requires audio input devices and WebRTC connections |
-| TC-06 | ⏳ | Pending | Requires extended testing with audio streaming |
-| TC-07 | ⏳ | Pending | Requires 4-peer mesh setup |
+| TC-04 | 2026-04-28 | ✓ PASS | Mesh topology test passed - 3 peers each establish 2 connections (6 total) |
+| TC-05 | ⏸ BLOCKED | Tauri prerequisites missing (webkit2gtk-4.1, rsvg2) - need audio devices |
+| TC-06 | ⏳ | Pending | Requires TC-05 complete |
+| TC-07 | 2026-04-28 | ✓ PASS | 4-peer mesh test passed - each peer establishes 3 connections (12 total) |
 | TC-08 | ⏳ | Pending | Stress test with rapid join/leave |
 | TC-09 | ⏳ | Pending | Race condition test |
 | TC-10 | ⏳ | Pending | Network partition simulation |
@@ -296,6 +296,23 @@ testThreePeerMesh().catch(console.error);
 2. **WebRTC resource usage**: Each peer maintains N-1 RTCPeerConnection objects
 3. **Audio mixing**: Client may need to mix N-1 audio streams
 4. **NAT traversal**: STUN/TURN server required for real-world P2P
+5. **Tauri build prerequisites**: Linux requires webkit2gtk-4.1 and rsvg2 packages
+
+## Current Blockers
+
+### Blocker: Tauri Build Environment (Linux)
+**Issue**: Missing prerequisites for Tauri v2 on Ubuntu 24.4
+- webkit2gtk-4.1: not installed
+- rsvg2: not installed
+
+**Resolution**: Install prerequisites
+```bash
+sudo apt-get install -y webkit2gtk-4.1 librsvg2-dev
+```
+
+**Workaround**: Test WebRTC mesh using browser-based approach (if jam-gui can run in browser mode without Tauri) or use Docker with proper prerequisites.
+
+**Status**: Blocked until prerequisites installed or workaround found
 
 ## Next Steps
 
