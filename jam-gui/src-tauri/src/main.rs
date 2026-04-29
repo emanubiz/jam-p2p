@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tauri::Emitter;
 use tokio::sync::mpsc;
-use webrtc::api::media_engine::MediaEngine;
-use webrtc::api::APIBuilder;
+use ::webrtc::api::media_engine::MediaEngine;
+use ::webrtc::api::APIBuilder;
 
 use crate::audio::{init_audio, start_encoder_thread};
 use crate::config::default_ice_servers;
@@ -66,8 +66,8 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
 
     let ice_servers = default_ice_servers();
     let local_track = Arc::new(
-        webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP::new(
-            webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability {
+        ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP::new(
+            ::webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability {
                 mime_type: "audio/opus".to_owned(),
                 ..Default::default()
             },

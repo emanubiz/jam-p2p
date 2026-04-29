@@ -1,4 +1,4 @@
-use webrtc::ice_transport::ice_server::RTCIceServer;
+use ::webrtc::ice_transport::ice_server::RTCIceServer;
 
 pub const FRAME_SIZE_MS: usize = 20;
 pub const DEFAULT_OPUS_BITRATE: i32 = 64_000;

@@ -5,18 +5,18 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tokio::sync::mpsc;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use webrtc::track::track_local::TrackLocal;
+use ::webrtc::ice_transport::ice_server::RTCIceServer;
+use ::webrtc::peer_connection::configuration::RTCConfiguration;
+use ::webrtc::peer_connection::RTCPeerConnection;
+use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use ::webrtc::track::track_local::TrackLocal;
 
 use crate::audio::{compute_audio_level, MixerMap};
 use crate::config::RING_BUFFER_SIZE_MULT;
 use crate::messages::SignalMessage;
 
 pub struct WebrtcContext {
-    pub api: Arc<webrtc::api::API>,
+    pub api: Arc<::webrtc::api::API>,
     pub ice_servers: Vec<RTCIceServer>,
     pub local_track: Arc<TrackLocalStaticRTP>,
     pub mixer: Arc<Mutex<MixerMap>>,
@@ -158,15 +158,15 @@ impl PeerManager {
             let p_clone = p_state.clone();
             Box::pin(async move {
                 match s {
-                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected => {
+                    ::webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected => {
                         tracing::info!("Peer {} connected", p_clone);
                         let _ = h_emit.emit("peer-joined", p_clone.clone());
                     }
-                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected => {
+                    ::webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected => {
                         tracing::info!("Peer {} disconnected", p_clone);
                         let _ = h_emit.emit("peer-left", p_clone.clone());
                     }
-                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Failed => {
+                    ::webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Failed => {
                         tracing::warn!("Peer {} connection failed", p_clone);
                     }
                     _ => {}
