@@ -68,6 +68,10 @@ jobs:
         with:
           workspaces: jam-gui/src-tauri
 
+      - name: Update webrtc dependency
+        working-directory: jam-gui/src-tauri
+        run: cargo update -p webrtc
+
       - name: Install frontend dependencies
         working-directory: jam-gui
         run: npm install
