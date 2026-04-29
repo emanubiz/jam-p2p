@@ -1,0 +1,104 @@
+use futures::StreamExt;
+use tokio::sync::mpsc;
+use tokio::time::Duration;
+
+use crate::config::{RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS};
+use crate::messages::SignalMessage;
+
+pub struct SignalingClient {
+    pub ws_sender: Option<
+        futures::stream::SplitSink<
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
+            tokio_tungstenite::tungstenite::Message,
+        >,
+    >,
+    pub ws_in_tx: mpsc::UnboundedSender<String>,
+    pub sig_tx: mpsc::UnboundedSender<SignalMessage>,
+    pub last_join: Option<(String, String, String)>,
+    pub reconnect_delay: u64,
+}
+
+impl SignalingClient {
+    pub fn new(
+        ws_in_tx: mpsc::UnboundedSender<String>,
+        sig_tx: mpsc::UnboundedSender<SignalMessage>,
+    ) -> Self {
+        SignalingClient {
+            ws_sender: None,
+            ws_in_tx,
+            sig_tx,
+            last_join: None,
+            reconnect_delay: RECONNECT_BASE_DELAY_MS,
+        }
+    }
+
+    pub async fn connect(
+        &mut self,
+        server: &str,
+        room: &str,
+        name: &str,
+        res_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+    ) {
+        tracing::info!("Connecting to {} room {}", server, room);
+        match tokio_tungstenite::connect_async(server).await {
+            Ok((ws, _)) => {
+                tracing::info!("Connected to signaling server");
+                self.reconnect_delay = RECONNECT_BASE_DELAY_MS;
+                self.last_join = Some((server.to_string(), room.to_string(), name.to_string()));
+                let (write, mut read) = ws.split();
+                let ws_in_tx = self.ws_in_tx.clone();
+
+                tokio::spawn(async move {
+                    while let Some(Ok(msg)) = read.next().await {
+                        if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
+                            let _ = ws_in_tx.send(t);
+                        }
+                    }
+                });
+
+                self.ws_sender = Some(write);
+                let _ = self.sig_tx.send(SignalMessage::Join {
+                    room: room.to_string(),
+                    name: name.to_string(),
+                });
+                let _ = res_tx.send(Ok(()));
+            }
+            Err(e) => {
+                tracing::warn!("Connection failed: {:?}", e);
+                let _ = res_tx.send(Err(format!("Connessione fallita: {}", e)));
+            }
+        }
+    }
+
+    pub async fn leave(&mut self) {
+        tracing::info!("Leaving room");
+        self.last_join = None;
+        if let Some(ws) = self.ws_sender.take() {
+            use futures::SinkExt;
+            let _ = ws.close().await;
+        }
+    }
+
+    pub async fn send_signal(&mut self, msg: &SignalMessage) {
+        if let Some(ws) = self.ws_sender.as_mut() {
+            if let Ok(json) = serde_json::to_string(msg) {
+                use futures::SinkExt;
+                let _ = ws
+                    .send(tokio_tungstenite::tungstenite::Message::Text(json))
+                    .await;
+            }
+        }
+    }
+
+    pub fn backoff_delay(&mut self) -> Duration {
+        let delay = self.reconnect_delay;
+        self.reconnect_delay = (self.reconnect_delay * 2).min(RECONNECT_MAX_DELAY_MS);
+        Duration::from_millis(delay)
+    }
+
+    pub fn should_reconnect(&self) -> bool {
+        self.last_join.is_some()
+    }
+}

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "productName": "jam-gui",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "identifier": "com.jam.p2p",
   "build": {
     "beforeDevCommand": "npm run dev",

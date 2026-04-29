@@ -1,94 +1,51 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio;
+mod config;
 mod logger;
+mod messages;
+mod signaling;
+mod state;
+mod webrtc;
 
-use anyhow::{Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use futures::StreamExt;
-use opus::{Application, Channels, Decoder, Encoder};
-use ringbuf::{
-    traits::{Consumer, Producer, Split},
-    HeapCons, HeapRb,
-};
-use serde_json;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use tauri::{State, Emitter}; 
+use anyhow::Result;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use tauri::Manager;
 use tokio::sync::mpsc;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
 
+use crate::audio::{init_audio, start_encoder_thread};
+use crate::config::default_ice_servers;
 use crate::logger::init_tracing;
-
-const FRAME_SIZE_MS: usize = 20;
-
-type MixerMap = HashMap<String, (HeapCons<f32>, f32)>;
-
-#[derive(Debug)]
-enum AppCommand {
-    Join { 
-        room: String, 
-        name: String, 
-        server: String, 
-        res_tx: tokio::sync::oneshot::Sender<Result<(), String>> 
-    },
-    SetVolume { peer_id: String, vol: f32 },
-}
-
-struct AppState {
-    tx: Mutex<mpsc::UnboundedSender<AppCommand>>,
-}
-
-#[tauri::command]
-async fn join_room(state: State<'_, AppState>, room: String, name: String, server: String) -> Result<(), String> {
-    let (res_tx, res_rx) = tokio::sync::oneshot::channel();
-    {
-        let tx = state.tx.lock().map_err(|e| e.to_string())?;
-        tx.send(AppCommand::Join { room, name, server, res_tx }).map_err(|e| e.to_string())?;
-    }
-    res_rx.await.map_err(|_| "Errore interno del backend".to_string())?
-}
-
-#[tauri::command]
-fn set_volume(state: State<AppState>, peer_id: String, vol: f32) -> Result<(), String> {
-    let tx = state.tx.lock().map_err(|e| e.to_string())?;
-    tx.send(AppCommand::SetVolume { peer_id, vol }).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type", content = "data")]
-enum SignalMessage {
-    Welcome { uuid: String },
-    Join { room: String, name: String },
-    PeerList { peers: Vec<String> },
-    NewPeer { uuid: String },
-    Offer { target: String, sdp: String, from: Option<String> },
-    Answer { target: String, sdp: String, from: Option<String> },
-    Ice { target: String, candidate: String, from: Option<String> },
-}
+use crate::messages::{AppCommand, SignalMessage};
+use crate::signaling::SignalingClient;
+use crate::state::init_state;
+use crate::webrtc::{PeerManager, WebrtcContext};
 
 fn main() {
     init_tracing();
     let (tx, mut rx) = mpsc::unbounded_channel::<AppCommand>();
+    let (app_state, backend_state) = init_state(tx);
 
     tauri::Builder::default()
-        .manage(AppState { tx: Mutex::new(tx) })
-        .invoke_handler(tauri::generate_handler![join_room, set_volume])
+        .manage(app_state)
+        .invoke_handler(tauri::generate_handler![
+            state::join_room,
+            state::set_volume,
+            state::leave_room,
+            state::set_opus_bitrate,
+            state::set_muted,
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
-            thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new()
+                    .expect("failed to create tokio runtime");
                 rt.block_on(async move {
-                    if let Err(e) = run_backend_loop(&mut rx, handle).await {
+                    if let Err(e) = run_backend(handle, backend_state).await {
                         tracing::error!("Backend error: {:?}", e);
                     }
                 });
@@ -99,251 +56,147 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-async fn run_backend_loop(rx: &mut mpsc::UnboundedReceiver<AppCommand>, handle: tauri::AppHandle) -> Result<()> {
-    let host = cpal::default_host();
-    let input_dev = host.default_input_device().context("no input device")?;
-    let output_dev = host.default_output_device().context("no output device")?;
-    let config_in: cpal::StreamConfig = input_dev.default_input_config()?.into();
-    let config_out: cpal::StreamConfig = output_dev.default_output_config()?.into();
-
-    // derive sample rate and channels from device config
-    let sample_rate: u32 = config_in.sample_rate.0;
-    let in_channels: usize = config_in.channels as usize;
-    let out_channels: usize = config_out.channels as usize;
-    let samples_per_frame: usize = (sample_rate as usize * FRAME_SIZE_MS) / 1000;
-
-    let rb_mic = HeapRb::<f32>::new((sample_rate as usize).max(1024));
-    let (mut mic_prod, mut mic_cons) = rb_mic.split();
-    let mixer_sources: Arc<Mutex<MixerMap>> = Arc::new(Mutex::new(HashMap::new()));
-    let mixer_injector = mixer_sources.clone();
-
-    let input_stream = input_dev.build_input_stream(&config_in, move |data: &[f32], _| {
-        if in_channels == 1 {
-            let _ = mic_prod.push_slice(data);
-        } else {
-            let mut mono: Vec<f32> = Vec::with_capacity(data.len() / in_channels);
-            for chunk in data.chunks(in_channels) {
-                let mut s = 0.0f32;
-                for &c in chunk { s += c; }
-                mono.push(s / (in_channels as f32));
-            }
-            let _ = mic_prod.push_slice(&mono);
-        }
-    }, |_| {}, None)?;
-    let mixer_lock = mixer_sources.clone();
-    let output_stream = output_dev.build_output_stream(&config_out, move |data: &mut [f32], _| {
-        // data is interleaved frames for out_channels
-        data.fill(0.0);
-        let frames = if out_channels > 0 { data.len() / out_channels } else { 0 };
-        if let Ok(mut sources) = mixer_lock.lock() {
-            for frame in 0..frames {
-                let mut mixed = 0.0f32;
-                for (_, (consumer, vol)) in sources.iter_mut() {
-                    if let Some(s) = consumer.try_pop() { mixed += s * (*vol); }
-                }
-                let m = mixed.tanh();
-                for ch in 0..out_channels {
-                    data[frame * out_channels + ch] = m;
-                }
-            }
-        }
-    }, |_| {}, None)?;
-
-    input_stream.play()?;
-    output_stream.play()?;
+async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState) -> Result<()> {
+    let audio = init_audio()?;
+    let mixer_sources = audio.mixer_sources.clone();
 
     let mut m = MediaEngine::default();
     m.register_default_codecs()?;
     let api = Arc::new(APIBuilder::new().with_media_engine(m).build());
-    let ice_servers = vec![RTCIceServer { urls: vec!["stun:stun.l.google.com:19302".to_string()], ..Default::default() }];
-    let local_track = Arc::new(TrackLocalStaticRTP::new(RTCRtpCodecCapability { mime_type: "audio/opus".to_owned(), ..Default::default() }, "audio".to_owned(), "webrtc-rs".to_owned()));
 
-    let track_clone = local_track.clone();
-    let sample_rate_clone = sample_rate;
-    thread::spawn(move || {
-        let mut encoder = Encoder::new(sample_rate_clone, Channels::Mono, Application::Voip).unwrap();
-        let mut pcm_buf = Vec::with_capacity(samples_per_frame);
-        let mut out_buf = [0u8; 1024];
-        let mut seq: u16 = 0;
-        loop {
-            while pcm_buf.len() < samples_per_frame { if let Some(s) = mic_cons.try_pop() { pcm_buf.push(s); } else { thread::sleep(std::time::Duration::from_millis(2)); } }
-            if let Ok(len) = encoder.encode_float(&pcm_buf, &mut out_buf) {
-                let _ = track_clone.write_rtp(&webrtc::rtp::packet::Packet {
-                    header: webrtc::rtp::header::Header { payload_type: 111, sequence_number: seq, timestamp: seq as u32 * samples_per_frame as u32, ..Default::default() },
-                    payload: bytes::Bytes::copy_from_slice(&out_buf[..len]),
-                });
-                seq = seq.wrapping_add(1);
-            }
-            pcm_buf.clear();
-        }
-    });
+    let ice_servers = default_ice_servers();
+    let local_track = Arc::new(
+        webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP::new(
+            webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability {
+                mime_type: "audio/opus".to_owned(),
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            "webrtc-rs".to_owned(),
+        ),
+    );
 
-    let mut peers: HashMap<String, Arc<RTCPeerConnection>> = HashMap::new();
-    let mut ws_sender = None;
-    let mut my_id: Option<String> = None;
+    let opus_bitrate = Arc::new(AtomicI32::new(crate::config::DEFAULT_OPUS_BITRATE));
+    let saved_volumes: Arc<StdMutex<Vec<(String, f32)>>> =
+        Arc::new(StdMutex::new(Vec::new()));
+
+    let _encoder_handle = start_encoder_thread(
+        local_track.clone(),
+        audio.mic_consumer,
+        mixer_sources.clone(),
+        audio.sample_rate,
+        audio.samples_per_frame,
+        opus_bitrate.clone(),
+    );
+
     let (sig_tx, mut sig_rx) = mpsc::unbounded_channel::<SignalMessage>();
     let (ws_in_tx, mut ws_in_rx) = mpsc::unbounded_channel::<String>();
+
+    let ctx = WebrtcContext {
+        api,
+        ice_servers,
+        local_track,
+        mixer: mixer_sources.clone(),
+        sig_tx: sig_tx.clone(),
+        handle: handle.clone(),
+        sample_rate: audio.sample_rate,
+        samples_per_frame: audio.samples_per_frame,
+    };
+
+    let mut peer_manager = PeerManager::new();
+    let mut sig_client = SignalingClient::new(ws_in_tx, sig_tx.clone());
+    let mut my_id: Option<String> = None;
 
     loop {
         tokio::select! {
             Some(cmd) = rx.recv() => {
                 match cmd {
                     AppCommand::Join { server, room, name, res_tx } => {
-                        match tokio_tungstenite::connect_async(&server).await {
-                            Ok((ws, _)) => {
-                                let (write, mut read) = ws.split();
-                                ws_sender = Some(write);
-                                let tx_inner = ws_in_tx.clone();
-                                tokio::spawn(async move {
-                                    while let Some(Ok(msg)) = read.next().await {
-                                        if let tokio_tungstenite::tungstenite::Message::Text(t) = msg { let _ = tx_inner.send(t); }
-                                    }
-                                });
-                                let _ = sig_tx.send(SignalMessage::Join { room, name });
-                                let _ = res_tx.send(Ok(()));
-                            },
-                            Err(e) => {
-                                let _ = res_tx.send(Err(format!("Connessione fallita: {}", e)));
-                            }
+                        sig_client.connect(&server, &room, &name, res_tx).await;
+                    }
+                    AppCommand::Leave { res_tx } => {
+                        sig_client.leave().await;
+                        peer_manager.close_all(&handle).await;
+                        my_id = None;
+                        // Clear saved volumes when leaving room
+                        if let Ok(mut vols) = saved_volumes.lock() {
+                            vols.clear();
                         }
-                    },
+                        let _ = res_tx.send(Ok(()));
+                    }
                     AppCommand::SetVolume { peer_id, vol } => {
                         if let Ok(mut sources) = mixer_sources.lock() {
-                            if let Some((_, v)) = sources.get_mut(&peer_id) { *v = vol; }
+                            if let Some((_, v)) = sources.get_mut(&peer_id) {
+                                *v = vol;
+                            }
+                        }
+                    }
+                    AppCommand::SetOpusBitrate { bitrate } => {
+                        opus_bitrate.store(bitrate, Ordering::Relaxed);
+                    }
+                    AppCommand::SetMute { muted } => {
+                        if let Ok(mut sources) = mixer_sources.lock() {
+                            if muted {
+                                let Ok(mut vols) = saved_volumes.lock() else { continue };
+                                vols.clear();
+                                for (peer_id, (_, vol)) in sources.iter() {
+                                    vols.push((peer_id.clone(), *vol));
+                                }
+                                for (_, vol) in sources.values_mut() {
+                                    *vol = 0.0;
+                                }
+                                tracing::info!("Muted {} peers, volumes saved", vols.len());
+                            } else {
+                                let Ok(vols) = saved_volumes.lock() else { continue };
+                                if vols.is_empty() { continue; }
+                                for (peer_id, vol) in vols.iter() {
+                                    if let Some((_, v)) = sources.get_mut(peer_id) {
+                                        *v = *vol;
+                                    }
+                                }
+                                tracing::info!("Unmuted, {} volumes restored", vols.len());
+                            }
                         }
                     }
                 }
             }
             Some(msg) = sig_rx.recv() => {
-                if let Some(ws) = ws_sender.as_mut() {
-                    if let Ok(json) = serde_json::to_string(&msg) {
-                        use futures::SinkExt;
-                        let _ = ws.send(tokio_tungstenite::tungstenite::Message::Text(json)).await;
-                    }
-                }
+                sig_client.send_signal(&msg).await;
             }
             Some(text) = ws_in_rx.recv() => {
                 if let Ok(signal) = serde_json::from_str::<SignalMessage>(&text) {
-                    handle_signal(signal, &mut peers, &mut my_id, local_track.clone(), sig_tx.clone(), mixer_injector.clone(), &api, ice_servers.clone(), handle.clone(), sample_rate, samples_per_frame).await?;
+                    // Set connected flag when Welcome is received
+                    if matches!(signal, SignalMessage::Welcome { .. }) {
+                        backend.connected.store(true, Ordering::SeqCst);
+                    }
+                    if let Err(e) = peer_manager.handle_signal(
+                        signal,
+                        &mut my_id,
+                        &ctx,
+                    ).await {
+                        tracing::error!("WebRTC signal error: {:?}", e);
+                    }
+                }
+            }
+            else => {
+                // ws_in_rx closed — connection dropped unexpectedly
+                let _ = handle.emit("disconnected", ());
+                peer_manager.close_all(&handle).await;
+                // Only reconnect if user didn't explicitly leave (last_join still set)
+                if sig_client.should_reconnect() {
+                    let delay = sig_client.backoff_delay();
+                    tracing::info!("Reconnecting in {}ms", delay.as_millis());
+                    tokio::time::sleep(delay).await;
+                    // Reconnect uses stored last_join internally
+                    let (res_tx, _) = tokio::sync::oneshot::channel();
+                    if let Some((server, room, name)) = sig_client.last_join.clone() {
+                        sig_client.connect(&server, &room, &name, res_tx).await;
+                    }
+                } else {
+                    // Explicit leave — clear state
+                    my_id = None;
                 }
             }
         }
     }
-}
-
-async fn handle_signal(
-    signal: SignalMessage,
-    peers: &mut HashMap<String, Arc<RTCPeerConnection>>,
-    my_id: &mut Option<String>,
-    local_track: Arc<TrackLocalStaticRTP>,
-    sig_tx: mpsc::UnboundedSender<SignalMessage>,
-    mixer: Arc<Mutex<MixerMap>>,
-    api: &Arc<webrtc::api::API>,
-    ice_servers: Vec<RTCIceServer>,
-    handle: tauri::AppHandle,
-    sample_rate: u32,
-    samples_per_frame: usize,
-) -> Result<()> {
-    
-    let create_pc = |pid: String, sig_tx: mpsc::UnboundedSender<SignalMessage>, local_track: Arc<TrackLocalStaticRTP>, mixer: Arc<Mutex<MixerMap>>, api: Arc<webrtc::api::API>, ice_servers: Vec<RTCIceServer>, h: tauri::AppHandle| async move {
-        let config = RTCConfiguration { ice_servers, ..Default::default() };
-        let pc = api.new_peer_connection(config).await?;
-        let track_auth = local_track as Arc<dyn TrackLocal + Send + Sync>;
-        pc.add_track(track_auth).await?;
-
-        let h_state_pc = h.clone();
-        let p_state = pid.clone();
-        pc.on_peer_connection_state_change(Box::new(move |s| {
-            if s == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
-                let _ = h_state_pc.emit("peer-joined", p_state.clone());
-            }
-            Box::pin(async move {})
-        }));
-
-        let m = mixer.clone(); let p_id = pid.clone();
-        let sample_rate_track = sample_rate;
-        let samples_per_frame_track = samples_per_frame;
-        let h_state_track = h.clone();
-        pc.on_track(Box::new(move |track, _, _| {
-            let m_inner = m.clone(); let p_inner = p_id.clone();
-            let h_emit = h_state_track.clone();
-            Box::pin(async move {
-                let rb = HeapRb::<f32>::new(sample_rate_track as usize * 2);
-                let (mut prod, cons) = rb.split();
-                if let Ok(mut s) = m_inner.lock() { s.insert(p_inner.clone(), (cons, 1.0)); }
-                let mut dec = Decoder::new(sample_rate_track, Channels::Mono).unwrap();
-                let mut pcm = vec![0f32; samples_per_frame_track * 2];
-                let ema_alpha: f32 = 0.3;
-                let mut prev_level: f32 = 0.0f32;
-                while let Ok((rtp, _)) = track.read_rtp().await {
-                    if let Ok(len) = dec.decode_float(&rtp.payload, &mut pcm, false) {
-                        let samples = &pcm[..len];
-                        // push decoded samples to mixing ringbuffer
-                        let _ = prod.push_slice(samples);
-                        // compute RMS level and emit smoothed value (EMA)
-                        let mut sum_sq = 0.0f32;
-                        for &v in samples { sum_sq += v * v; }
-                        let rms = (sum_sq / (samples.len() as f32)).sqrt();
-                        // convert to dBFS and normalize: map [-60 dB .. 0 dB] -> [0 .. 1]
-                        let db = 20.0f32 * (rms.max(1e-12f32)).log10();
-                        let mut norm = (db + 60.0f32) / 60.0f32;
-                        if norm.is_nan() || norm.is_infinite() { norm = 0.0; }
-                        if norm < 0.0 { norm = 0.0; }
-                        if norm > 1.0 { norm = 1.0; }
-                        prev_level = ema_alpha * norm + (1.0 - ema_alpha) * prev_level;
-                        let _ = h_emit.emit("peer-level", serde_json::json!({ "id": p_inner.clone(), "level": prev_level }));
-                    }
-                }
-                if let Ok(mut s) = m_inner.lock() { s.remove(&p_inner); }
-            })
-        }));
-
-        let tx_ice = sig_tx.clone(); let p_ice = pid.clone();
-        pc.on_ice_candidate(Box::new(move |c| {
-            let tx = tx_ice.clone(); let p = p_ice.clone();
-            Box::pin(async move {
-                if let Some(c) = c {
-                    if let Ok(j) = c.to_json() {
-                        let _ = tx.send(SignalMessage::Ice { target: p, candidate: serde_json::to_string(&j).unwrap(), from: None });
-                    }
-                }
-            })
-        }));
-        Ok::<Arc<RTCPeerConnection>, anyhow::Error>(Arc::new(pc))
-    };
-
-    match signal {
-        SignalMessage::Welcome { uuid } => { *my_id = Some(uuid); }
-        SignalMessage::PeerList { peers: remote_peers } => {
-            for pid in remote_peers {
-                let pc = create_pc(pid.clone(), sig_tx.clone(), local_track.clone(), mixer.clone(), api.clone().into(), ice_servers.clone(), handle.clone()).await?;
-                let offer = pc.create_offer(None).await?;
-                pc.set_local_description(offer.clone()).await?;
-                let _ = sig_tx.send(SignalMessage::Offer { target: pid.clone(), sdp: serde_json::to_string(&offer).unwrap(), from: None });
-                peers.insert(pid, pc);
-            }
-        }
-        SignalMessage::Offer { sdp, from, .. } => {
-            if let Some(pid) = from {
-                let pc = create_pc(pid.clone(), sig_tx.clone(), local_track, mixer, api.clone().into(), ice_servers, handle).await?;
-                pc.set_remote_description(serde_json::from_str(&sdp)?).await?;
-                let answer = pc.create_answer(None).await?;
-                pc.set_local_description(answer.clone()).await?;
-                let _ = sig_tx.send(SignalMessage::Answer { target: pid.clone(), sdp: serde_json::to_string(&answer).unwrap(), from: None });
-                peers.insert(pid, pc);
-            }
-        }
-        SignalMessage::Answer { sdp, from, .. } => {
-            if let Some(pid) = from {
-                if let Some(pc) = peers.get(&pid) { pc.set_remote_description(serde_json::from_str(&sdp)?).await?; }
-            }
-        }
-        SignalMessage::Ice { candidate, from, .. } => {
-            if let Some(pid) = from {
-                if let Some(pc) = peers.get(&pid) { let _ = pc.add_ice_candidate(serde_json::from_str(&candidate)?).await; }
-            }
-        }
-        _ => {}
-    }
-    Ok(())
 }

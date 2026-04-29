@@ -1,56 +1,202 @@
 # Jam P2P
 
-Questo repository contiene un'applicazione desktop ibrida (Tauri + React) per jam audio P2P e il relativo signaling server.
+Applicazione desktop P2P per jam audio collaborativo a bassa latenza via WebRTC.
 
 Panoramica:
-- Frontend: `jam-gui` (React + Vite + Tauri)
-- Signaling server: `jam-signaler` (Node.js, WebSocket)
-- Runtime nativo: `src-tauri` (binding Rust per audio e WebRTC)
+- **Frontend UI**: `jam-gui/` — React + Vite + Tauri v2
+- **Backend nativo**: `jam-gui/src-tauri/` — Rust (cpal, Opus, webrtc-rs, WebSocket signaling)
+- **Signaling server**: `jam-signaler/` — Node.js + ws (WebSocket + HTTP API)
 
-Requisiti locali di sviluppo
-- Node.js >= 18
-- Rust >= 1.70, `cargo` e toolchain `stable`
-- Tauri prerequisites (platform-specific): vcpkg, OpenSSL su Windows/macOS a seconda del setup
+Architettura: il backend Rust gestisce cattura/riproduzione audio, codec Opus e connessioni WebRTC. La UI React comunica con il backend tramite Tauri Commands ed eventi.
 
-Quickstart (sviluppo)
+---
 
-1) Installare dipendenze frontend:
+## Requisiti di sviluppo
 
-```bash
-cd jam-gui
-npm install
-```
+| Dipendenza | Versione minima |
+|---|---|
+| Node.js | >= 18 |
+| Rust | >= 1.70 (toolchain `stable`) |
+| Tauri CLI | v2 |
 
-2) Avviare il signaling server (locale):
+### Linux (Ubuntu/Debian)
 
 ```bash
-cd ../jam-signaler
-node server.js
+sudo apt install libpango1.0-dev libcairo2-dev libglib2.0-dev libatk1.0-dev \
+  libgdk-pixbuf2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+  librsvg2-dev patchelf libasound2-dev pkg-config build-essential
 ```
 
-3) Avviare frontend + Tauri in dev:
+### macOS
 
 ```bash
-cd ../jam-gui
-npm run dev        # vite dev
-npm run tauri      # avvia la finestra Tauri (dev)
+brew install cmake
 ```
 
-Note:
-- Il signaling server è implementato in Node.js e si trova in `jam-signaler/server.js`.
-- Il codice Rust in `src-tauri` gestisce l'I/O audio e le PeerConnection WebRTC. In produzione è possibile compilare con `npm run build` (nella cartella `jam-gui`) e poi packaging Tauri.
+### Windows
 
-Produzione / build
+Visual Studio Build Tools + WebView2 runtime. Vedi [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
-1) Build frontend:
+---
+
+## Quickstart
+
+### 1. Installare dipendenze frontend
 
 ```bash
-cd jam-gui
-npm run build
+cd jam-gui && npm install
 ```
 
-2) Build Tauri bundle (da `jam-gui`):
+### 2. Avviare il signaling server
 
 ```bash
-npm run tauri build
+cd jam-signaler && npm install && npm start
 ```
+
+Server attivo su `ws://localhost:8080`
+
+### 3. Avviare l'app in dev mode
+
+**Solo UI (browser):**
+```bash
+cd jam-gui && npm run dev
+```
+
+**Tauri desktop (richiesto ambiente nativo):**
+```bash
+cd jam-gui && npm run tauri dev
+```
+
+### 4. Docker (solo signaling server)
+
+```bash
+cd jam-signaler
+npm install && npm run build   # compila con ncc
+docker compose up --build
+```
+
+---
+
+## Produzione / build
+
+### Frontend
+
+```bash
+cd jam-gui && npm run build
+```
+
+### Tauri bundle (tutte le piattaforme)
+
+```bash
+cd jam-gui && npm run tauri build
+```
+
+### CI/CD
+
+Il workflow `.github/workflows/build.yml` builda automaticamente per:
+- Linux (AppImage + .deb)
+- macOS Intel & Apple Silicon (.dmg + .app)
+- Windows (.msi + .exe)
+
+I tag `v*` triggerano una GitHub Release con gli artifact.
+
+---
+
+## Struttura del repository
+
+```
+jam-p2p/
+├── jam-gui/                    # React UI + Tauri v2
+│   ├── src/                    # Componenti React
+│   │   ├── App.tsx             # UI principale (room join, mixer, VU meters)
+│   │   ├── App.css             # Stili
+│   │   ├── types.ts            # TypeScript types
+│   │   └── main.tsx            # Entry point
+│   └── src-tauri/              # Backend Rust (modulare)
+│       ├── src/
+│       │   ├── main.rs         # Entry point, Tauri setup, backend loop (~188 righe)
+│       │   ├── audio.rs        # cpal I/O, Opus encoder, mixer, VU calculation + 4 test
+│       │   ├── webrtc.rs       # PeerConnection creation, signal handler, track management
+│       │   ├── signaling.rs    # WebSocket client, reconnect con exponential backoff
+│       │   ├── state.rs        # Tauri state + 5 commands (join, leave, volume, bitrate, mute)
+│       │   ├── messages.rs     # SignalMessage + AppCommand enums
+│       │   ├── config.rs       # Costanti, ICE server configuration
+│       │   └── logger.rs       # Tracing/logging initialization
+│       ├── Cargo.toml
+│       └── tauri.conf.json
+├── jam-signaler/               # Signaling server Node.js
+│   ├── server.js               # WebSocket + HTTP API, rate limiting, message validation
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── .github/workflows/
+│   └── build.yml               # CI/CD multi-piattaforma
+└── docs/
+    ├── architecture/           # Documentazione architettura
+    └── testing/                # Piani di test e verifica
+```
+
+---
+
+## Componenti
+
+### Backend Rust (src-tauri)
+
+| Feature | Stato | Note |
+|---|---|---|
+| Cattura audio (cpal) | ✅ Implementato | Mono/stereo downmix automatico |
+| Codec Opus (encoder/decoder) | ✅ Implementato | VoIP mode, bitrate configurabile |
+| WebRTC peer connections (webrtc-rs) | ✅ Implementato | Full mesh via RTP tracks |
+| Signaling WebSocket client | ✅ Implementato | Reconnect con exponential backoff |
+| Mixer multi-peer | ✅ Implementato | Ringbuffer + soft clipping (tanh) |
+| VU meter via eventi Tauri | ✅ Implementato | RMS → dBFS → EMA smoothing |
+| Reconnect esponenziale | ✅ Implementato | 1s → 30s max |
+| TURN server (openrelay) | ✅ Configurato | STUN + TURN nel signaling e nel backend |
+| Mute/Unmute con save/restore | ✅ Implementato | Volumi salvati e ripristinati |
+| Encoder shutdown | ✅ Implementato | Watch channel per graceful shutdown |
+| Double join guard | ✅ Implementato | `connected` atomic flag |
+| Rate limiting signaling | ✅ Implementato | 50 msg/sec, max 64KB |
+| NewPeer handling | ✅ Implementato | Crea PC e invia Offer automaticamente |
+| PeerLeft signaling | ✅ Implementato | Cleanup immediato + evento UI |
+
+### Signaling Server (jam-signaler)
+
+| Feature | Stato | Note |
+|---|---|---|
+| WebSocket signaling | ✅ | Join/Leave/Offer/Answer/ICE |
+| Heartbeat 30s ping/pong | ✅ | Dead peer detection |
+| HTTP API (`/health`, `/ice-servers`, `/room/:name`) | ✅ | GET only, CORS enabled |
+| STUN + TURN config | ✅ | Google STUN + OpenRelay TURN |
+| Graceful disconnect + PeerLeft | ✅ | Cleanup stanze vuote |
+| Docker deployment | ✅ | Dockerfile + docker-compose |
+| Rate limiting | ✅ | 50 msg/sec per connessione |
+| Message size limit | ✅ | Max 64KB per messaggio |
+| Input validation | ✅ | Room name validation |
+
+### Frontend (jam-gui)
+
+| Feature | Stato | Note |
+|---|---|---|
+| Room join UI | ✅ | Server + room input |
+| Volume control per peer | ✅ | Slider 0-100% |
+| VU meter visualization | ✅ | 20-bar LED-style (green/yellow/red) |
+| Status indicator | ✅ | idle/joining/connected/disconnected/error |
+| Mute toggle | ✅ | 🔊 LIVE / 🔇 MUTED |
+| Disconnect button | ✅ | Leave room + cleanup |
+| Tauri commands integration | ✅ | 5 commands |
+| ESLint + TypeScript strict | ✅ | Configurato |
+
+---
+
+## Note
+
+- Il signaling server Node.js è **solo** per lo scambio di messaggi di signaling (Join/Leave/Offer/Answer/ICE). L'audio fluisce direttamente P2P via WebRTC.
+- TURN server pubblico (openrelay.metered.ca) preconfigurato per NAT traversal.
+- Topologia: **full mesh** — adatta per 2-6 peer. Per sessioni più grandi servirebbe SFU.
+
+### Issue notevoli aperti
+
+Vedere [ROADMAP.md](./ROADMAP.md) per la lista completa dei remaining issues e priorità.
+
+---
+
+**Ultimo aggiornamento**: 2026-04-29
