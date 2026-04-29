@@ -21,7 +21,7 @@ ringbuf = "0.4"
 url = "2.5"
 bytes = "1.5"
 opus = "0.3"
-webrtc = "0.10"
+webrtc = "0.11"
 uuid = { version = "1.7", features = ["v4", "serde"] }
 anyhow = "1.0"
 once_cell = "1.19"

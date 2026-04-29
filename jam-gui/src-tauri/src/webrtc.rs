@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use opus::{Channels, Decoder};
-use ringbuf::{traits::Producer, HeapRb};
+use ringbuf::{traits::Producer, traits::Split, HeapRb};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
@@ -131,7 +131,7 @@ impl PeerManager {
         Ok(())
     }
 
-    pub async fn close_all(&mut self, handle: &tauri::AppHandle) {
+    pub async fn close_all(&mut self, _handle: &tauri::AppHandle) {
         for (pid, pc) in self.peers.drain() {
             tracing::info!("Closing peer connection: {}", pid);
             let _ = pc.close();
