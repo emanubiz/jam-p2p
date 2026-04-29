@@ -132,7 +132,7 @@ pub fn start_encoder_thread(
     samples_per_frame: usize,
     opus_bitrate: Arc<AtomicI32>,
 ) -> EncoderHandle {
-    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     thread::spawn(move || {
         let mut encoder = match Encoder::new(sample_rate, Channels::Mono, Application::Voip) {
