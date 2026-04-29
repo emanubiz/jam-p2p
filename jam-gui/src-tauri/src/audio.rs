@@ -12,8 +12,9 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use crate::config::{DEFAULT_OPUS_BITRATE, FRAME_SIZE_MS, RING_BUFFER_SIZE_MULT, RTP_PAYLOAD_TYPE};
-use opus::{Application, Channels, Encoder};
+use opus::{Application, Bitrate, Channels, Encoder};
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use webrtc::track::track_local::TrackLocalWriter;
 
 pub type MixerMap = HashMap<String, (HeapCons<f32>, f32)>;
 
@@ -141,7 +142,7 @@ pub fn start_encoder_thread(
                 return;
             }
         };
-        let _ = encoder.set_bitrate(DEFAULT_OPUS_BITRATE);
+        let _ = encoder.set_bitrate(Bitrate::Bits(DEFAULT_OPUS_BITRATE));
         let mut pcm_buf = Vec::with_capacity(samples_per_frame);
         let mut out_buf = [0u8; 1024];
         let mut seq: u16 = 0;
@@ -153,9 +154,8 @@ pub fn start_encoder_thread(
                 break;
             }
 
-            if let Ok(br) = opus_bitrate.load(Ordering::Relaxed) {
-                let _ = encoder.set_bitrate(br);
-            }
+            let br = opus_bitrate.load(Ordering::Relaxed);
+                let _ = encoder.set_bitrate(Bitrate::Bits(br));
             while pcm_buf.len() < samples_per_frame {
                 if *shutdown_rx.borrow() {
                     return;
@@ -163,10 +163,10 @@ pub fn start_encoder_thread(
                 if let Ok(sources) = mixer_sources.lock() {
                     let peer_count = sources.len();
                     if peer_count == 0 {
-                        if let Some(s) = mic_cons.pop() {
+                        if let Some(s) = mic_cons.try_pop() {
                             pcm_buf.push(s);
                             while pcm_buf.len() < samples_per_frame {
-                                if let Some(s) = mic_cons.pop() {
+                                if let Some(s) = mic_cons.try_pop() {
                                     pcm_buf.push(s);
                                 } else {
                                     break;
@@ -176,7 +176,7 @@ pub fn start_encoder_thread(
                             thread::sleep(Duration::from_millis(1));
                         }
                     } else {
-                        if let Some(s) = mic_cons.pop() {
+                        if let Some(s) = mic_cons.try_pop() {
                             pcm_buf.push(s);
                         }
                     }
