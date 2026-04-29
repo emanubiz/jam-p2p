@@ -75,7 +75,7 @@ impl SignalingClient {
     pub async fn leave(&mut self) {
         tracing::info!("Leaving room");
         self.last_join = None;
-        if let Some(ws) = self.ws_sender.take() {
+        if let Some(mut ws) = self.ws_sender.take() {
             use futures::SinkExt;
             let _ = ws.close().await;
         }

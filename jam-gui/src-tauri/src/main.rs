@@ -12,7 +12,7 @@ use anyhow::Result;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::mpsc;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
@@ -27,7 +27,7 @@ use crate::webrtc::{PeerManager, WebrtcContext};
 
 fn main() {
     init_tracing();
-    let (tx, mut rx) = mpsc::unbounded_channel::<AppCommand>();
+    let (tx, rx) = mpsc::unbounded_channel::<AppCommand>();
     let (app_state, backend_state) = init_state(tx);
 
     tauri::Builder::default()
@@ -45,7 +45,7 @@ fn main() {
                 let rt = tokio::runtime::Runtime::new()
                     .expect("failed to create tokio runtime");
                 rt.block_on(async move {
-                    if let Err(e) = run_backend(handle, backend_state).await {
+                    if let Err(e) = run_backend(handle, backend_state, rx).await {
                         tracing::error!("Backend error: {:?}", e);
                     }
                 });
@@ -56,7 +56,7 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState) -> Result<()> {
+async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut rx: mpsc::UnboundedReceiver<AppCommand>) -> Result<()> {
     let audio = init_audio()?;
     let mixer_sources = audio.mixer_sources.clone();
 

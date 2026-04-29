@@ -47,6 +47,7 @@ impl PeerManager {
             SignalMessage::Welcome { uuid } => {
                 *my_id = Some(uuid);
             }
+            SignalMessage::Join { .. } => {}
             SignalMessage::PeerList {
                 peers: remote_peers,
             } => {
