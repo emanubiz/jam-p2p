@@ -1,81 +1,46 @@
-
-// App.tsx
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Peer } from "./types";
 import "./App.css";
-import { usePeers } from "./hooks/usePeers";
 
 function App() {
   const [room, setRoom] = useState("studio1");
-  const [name] = useState(() => "player" + Math.floor(Math.random() * 100));
   const [server, setServer] = useState("ws://localhost:8080");
-  const [status, setStatus] = useState<"idle" | "joining" | "connected" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "joining" | "connected" | "disconnected" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
-
-  const { peers, addPeer, removePeer, setPeerVolume, setPeerLevel } = usePeers();
-
-  // start local mic capture and publish a local pseudo-peer for VM meter
-  useEffect(() => {
-    let running = true;
-    addPeer({ id: 'local', name: 'You', volume: 1.0, level: 0 });
-    async function startMic() {
-      if (!navigator || !navigator.mediaDevices) return;
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const src = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 2048;
-        src.connect(analyser);
-        const data = new Float32Array(analyser.fftSize);
-        const tick = () => {
-          if (!running) return;
-          analyser.getFloatTimeDomainData(data);
-          let sum = 0;
-          for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
-          const rms = Math.sqrt(sum / data.length);
-          const db = 20 * Math.log10(Math.max(1e-12, rms));
-          let norm = (db + 60) / 60;
-          if (!isFinite(norm) || isNaN(norm)) norm = 0;
-          norm = Math.max(0, Math.min(1, norm));
-          setPeerLevel('local', norm);
-          requestAnimationFrame(tick);
-        };
-        tick();
-      } catch (e) {
-        console.warn('Microphone access denied or unavailable', e);
-      }
-    }
-    startMic();
-    return () => { running = false; };
-  }, [addPeer, setPeerLevel]);
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [muted, setMuted] = useState(false);
 
   useEffect(() => {
-    let unlisten: any;
+    let cleanups: (() => void)[] = [];
     async function setup() {
-      unlisten = await listen<string>("peer-joined", (event) => {
-        addPeer({ 
-          id: event.payload, 
-          name: `Musician ${event.payload.slice(0, 4)}`, 
-          volume: 1.0,
-          level: 0
+      const u1 = await listen<string>("peer-joined", (event) => {
+        setPeers(prev => {
+          if (prev.find(p => p.id === event.payload)) return prev;
+          return [...prev, { id: event.payload, name: `Musician ${event.payload.slice(0, 4)}`, volume: 1.0, level: 0 }];
         });
       });
-      // listen for per-peer level (VM meter) updates from backend
-      await listen<{ id: string; level: number }>("peer-level", (ev) => {
-        setPeerLevel(ev.payload.id, ev.payload.level);
+      const u2 = await listen<{ id: string; level: number }>("peer-level", (ev) => {
+        setPeers(prev => prev.map(p => p.id === ev.payload.id ? { ...p, level: ev.payload.level } : p));
       });
+      const u3 = await listen("disconnected", () => {
+        setStatus("disconnected");
+      });
+      const u4 = await listen<string>("peer-left", (ev) => {
+        setPeers(prev => prev.filter(p => p.id !== ev.payload));
+      });
+      cleanups = [u1, u2, u3, u4];
     }
     setup();
-    return () => { if (unlisten) unlisten(); };
-  }, [addPeer]);
+    return () => { cleanups.forEach(fn => fn()); };
+  }, []);
 
   async function connect() {
     setStatus("joining");
     setError(null);
     try {
-      await invoke("join_room", { room, name, server });
+      await invoke("join_room", { room, name: "user", server });
       setStatus("connected");
     } catch (err: any) {
       setError(String(err));
@@ -83,10 +48,31 @@ function App() {
     }
   }
 
-  function onVolumeChange(peerId: string, v: number) {
-    setPeerVolume(peerId, v);
-    invoke("set_volume", { peer_id: peerId, vol: v }).catch(console.warn);
+  async function disconnect() {
+    try {
+      await invoke("leave_room");
+      setPeers([]);
+      setStatus("idle");
+    } catch (err) {
+      setError(String(err));
+      setStatus("error");
+    }
   }
+
+  function onVolumeChange(peerId: string, v: number) {
+    setPeers(prev => prev.map(p => p.id === peerId ? { ...p, volume: v } : p));
+    invoke("set_volume", { peerId, vol: v }).catch(console.warn);
+  }
+
+  async function toggleMute() {
+    const next = !muted;
+    setMuted(next);
+    invoke("set_muted", { muted: next }).catch(console.warn);
+  }
+
+  const buttonLabel = status === "joining" ? "Connecting"
+    : status === "disconnected" ? "Reconnect"
+    : "Connect to Session";
 
   return (
     <div className="app-container">
@@ -121,9 +107,9 @@ function App() {
             <div className="connection-form">
               <div className="input-group">
                 <label className="input-label">Server Endpoint</label>
-                <input 
+                <input
                   className="input-field input-mono"
-                  value={server} 
+                  value={server}
                   onChange={(e) => setServer(e.target.value)}
                   disabled={status === "joining"}
                 />
@@ -131,17 +117,17 @@ function App() {
 
               <div className="input-group">
                 <label className="input-label">Room ID</label>
-                <input 
+                <input
                   className="input-field"
-                  value={room} 
+                  value={room}
                   onChange={(e) => setRoom(e.target.value)}
                   disabled={status === "joining"}
                 />
               </div>
 
-              <button 
+              <button
                 className={`connect-btn ${status === "joining" ? "connecting" : ""}`}
-                onClick={connect} 
+                onClick={connect}
                 disabled={status === "joining"}
               >
                 {status === "joining" ? (
@@ -149,7 +135,7 @@ function App() {
                     <span className="spinner" />
                     Connecting
                   </>
-                ) : "Connect to Session"}
+                ) : buttonLabel}
               </button>
             </div>
           )}
@@ -160,6 +146,7 @@ function App() {
               {status === "idle" && "Ready"}
               {status === "joining" && "Establishing Connection"}
               {status === "connected" && "Live Session"}
+              {status === "disconnected" && "Disconnected — tap Reconnect"}
               {status === "error" && "Connection Failed"}
             </span>
           </div>
@@ -175,11 +162,27 @@ function App() {
             <div className="mixer-section">
               <div className="mixer-header">
                 <h3 className="mixer-title">Active Channels</h3>
-                <div className="peer-count">
-                  {peers.length} {peers.length === 1 ? 'PEER' : 'PEERS'}
+                <div className="mixer-controls">
+                  <button
+                    className={`mute-btn ${muted ? "muted" : ""}`}
+                    onClick={toggleMute}
+                    title={muted ? "Unmute" : "Mute"}
+                  >
+                    {muted ? "🔇 MUTED" : "🔊 LIVE"}
+                  </button>
+                  <button
+                    className="disconnect-btn"
+                    onClick={disconnect}
+                    title="Disconnect from room"
+                  >
+                    ⏏ Disconnect
+                  </button>
+                  <div className="peer-count">
+                    {peers.length} {peers.length === 1 ? 'PEER' : 'PEERS'}
+                  </div>
                 </div>
               </div>
-              
+
               {peers.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-icon">⌛</div>
@@ -188,36 +191,30 @@ function App() {
               ) : (
                 <div className="peers-list">
                   {peers.map(p => (
-                    <div key={p.id} className={`peer-card ${p.id === 'local' ? 'local' : ''}`}>
+                    <div key={p.id} className="peer-card">
                       <div className="peer-header">
                         <div className="peer-info">
-                          <div className={`peer-avatar ${p.id === 'local' ? 'local' : ''}`}>{p.id === 'local' ? '🎤' : '🎵'}</div>
+                          <div className="peer-avatar">🎵</div>
                           <div className="peer-details">
-                            <div className="peer-name">{p.id === 'local' ? 'Local Mic' : p.name}</div>
-                            <div className="peer-id">{p.id === 'local' ? 'local' : p.id.slice(0, 8)}</div>
+                            <div className="peer-name">{p.name}</div>
+                            <div className="peer-id">{p.id.slice(0, 8)}</div>
                           </div>
                         </div>
-                        {p.id !== 'local' ? (
-                          <button 
-                            className="remove-btn"
-                            onClick={() => removePeer(p.id)}
-                          >×</button>
-                        ) : null}
                       </div>
-                      
+
                       <div className="volume-control">
                         <div className="volume-label">VOL</div>
                         <div className="volume-slider-wrapper">
                           <div className="volume-track">
                             <div className="volume-fill" style={{width: `${p.volume * 100}%`}} />
                           </div>
-                          <input 
-                            type="range" 
+                          <input
+                            type="range"
                             className="volume-input"
-                            min={0} 
-                            max={1} 
-                            step={0.01} 
-                            value={p.volume} 
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={p.volume}
                             onChange={(e) => onVolumeChange(p.id, Number(e.target.value))}
                           />
                         </div>
@@ -226,8 +223,8 @@ function App() {
 
                       <div className="level-meter">
                         {[...Array(20)].map((_, i) => (
-                          <div 
-                            key={i} 
+                          <div
+                            key={i}
                             className={`level-bar ${i < (p.level ?? 0) * 20 ? i < 14 ? 'green' : i < 18 ? 'yellow' : 'red' : ''}`}
                           />
                         ))}

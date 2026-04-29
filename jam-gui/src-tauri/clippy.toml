@@ -1,0 +1,8 @@
+# Clippy configuration for jam-gui
+# See: https://doc.rust-lang.org/clippy/lint_configuration.html
+
+# Warn on unwrap/expect usage to encourage proper error handling
+allow-unwrap-in-tests = true
+
+# Warn when using allow attributes without explaining why
+allow-attributes-without-reason = "warn"
