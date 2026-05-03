@@ -11,6 +11,9 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [muted, setMuted] = useState(false);
+  const [localLevel, setLocalLevel] = useState(0);
+  const [bitrate, setBitrate] = useState(64);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     let cleanups: (() => void)[] = [];
@@ -30,7 +33,10 @@ function App() {
       const u4 = await listen<string>("peer-left", (ev) => {
         setPeers(prev => prev.filter(p => p.id !== ev.payload));
       });
-      cleanups = [u1, u2, u3, u4];
+      const u5 = await listen<{ level: number }>("local-level", (ev) => {
+        setLocalLevel(ev.payload.level);
+      });
+      cleanups = [u1, u2, u3, u4, u5];
     }
     setup();
     return () => { cleanups.forEach(fn => fn()); };
@@ -69,6 +75,37 @@ function App() {
     setMuted(next);
     invoke("set_muted", { muted: next }).catch(console.warn);
   }
+
+  function handleBitrateChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const value = Number(e.target.value);
+    setBitrate(value);
+    invoke("set_opus_bitrate", { bitrate: value }).catch(console.warn);
+  }
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "m" || e.key === "M") {
+        e.preventDefault();
+        toggleMute();
+      }
+      if (
+        (e.ctrlKey && e.shiftKey && (e.key === "d" || e.key === "D")) ||
+        e.key === "Escape"
+      ) {
+        e.preventDefault();
+        disconnect();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [status, muted]);
+
+  // Connection quality based on status
+  const connectionQuality = status === "connected" ? "good"
+    : status === "joining" ? "fair"
+    : status === "disconnected" ? "poor"
+    : "poor";
 
   const buttonLabel = status === "joining" ? "Connecting"
     : status === "disconnected" ? "Reconnect"
@@ -149,6 +186,13 @@ function App() {
               {status === "disconnected" && "Disconnected — tap Reconnect"}
               {status === "error" && "Connection Failed"}
             </span>
+            {status === "connected" && (
+              <div className={`quality-badge quality-${connectionQuality}`} title="Connection quality">
+                {connectionQuality === "good" && "● GOOD"}
+                {connectionQuality === "fair" && "● FAIR"}
+                {connectionQuality === "poor" && "● POOR"}
+              </div>
+            )}
           </div>
 
           {error && (
@@ -169,6 +213,7 @@ function App() {
                     title={muted ? "Unmute" : "Mute"}
                   >
                     {muted ? "🔇 MUTED" : "🔊 LIVE"}
+                    <span className="shortcut-hint">(M)</span>
                   </button>
                   <button
                     className="disconnect-btn"
@@ -176,10 +221,64 @@ function App() {
                     title="Disconnect from room"
                   >
                     ⏏ Disconnect
+                    <span className="shortcut-hint">(Esc)</span>
                   </button>
                   <div className="peer-count">
                     {peers.length} {peers.length === 1 ? 'PEER' : 'PEERS'}
                   </div>
+                  <button
+                    className={`settings-toggle ${settingsOpen ? "open" : ""}`}
+                    onClick={() => setSettingsOpen(!settingsOpen)}
+                    title="Settings"
+                  >
+                    ⚙
+                  </button>
+                </div>
+              </div>
+
+              {/* Settings Panel */}
+              <div className={`settings-panel ${settingsOpen ? "open" : ""}`}>
+                <div className="settings-group">
+                  <label className="settings-label">
+                    Opus Bitrate
+                    <span className="settings-value">{bitrate} kbps</span>
+                  </label>
+                  <div className="bitrate-control">
+                    <span className="bitrate-range-label">16</span>
+                    <input
+                      type="range"
+                      className="bitrate-slider"
+                      min={16}
+                      max={192}
+                      step={1}
+                      value={bitrate}
+                      onChange={handleBitrateChange}
+                    />
+                    <span className="bitrate-range-label">192</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="local-mic-card">
+                <div className="peer-header">
+                  <div className="peer-info">
+                    <div className="peer-avatar local">🎤</div>
+                    <div className="peer-details">
+                      <div className="peer-name">Local Mic</div>
+                      <div className="peer-id">MY INPUT</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="local-level-meter">
+                  {[...Array(20)].map((_, i) => (
+                    <div
+                      key={i}
+                      className={`local-level-bar ${i < localLevel * 20 ? (i < 14 ? 'blue-low' : i < 18 ? 'blue-mid' : 'blue-high') : ''}`}
+                    />
+                  ))}
+                </div>
+                <div className="local-level-label">
+                  LEVEL: {Math.round(localLevel * 100)}%
                 </div>
               </div>
 

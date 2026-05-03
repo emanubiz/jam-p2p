@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Events emitted from the WebSocket layer to signal lifecycle changes.
+#[derive(Debug, Clone)]
+pub enum WsEvent {
+    /// The WS reader loop exited (connection dropped or closed).
+    Disconnected,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", content = "data")]
 pub enum SignalMessage {

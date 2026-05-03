@@ -589,7 +589,235 @@ body {
   background: #ef4444;
 }
 
+/* Local Level Meter */
+.local-mic-card {
+  background: rgba(2, 6, 23, 0.7);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.local-level-meter {
+  display: flex;
+  gap: 2px;
+  margin-top: 12px;
+  height: 3px;
+}
+
+.local-level-bar {
+  flex: 1;
+  background: rgba(63, 63, 70, 0.3);
+  transition: background 0.1s;
+}
+
+.local-level-bar.blue-low {
+  background: #3b82f6;
+}
+
+.local-level-bar.blue-mid {
+  background: #1d4ed8;
+}
+
+.local-level-bar.blue-high {
+  background: #1e3a8a;
+}
+
+.local-level-label {
+  margin-top: 8px;
+  font-size: 10px;
+  color: #60a5fa;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* Animations */
+@keyframes gridMove {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(50px); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(30px, 30px); }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ============================================
+   Connection Quality Badge
+   ============================================ */
+.quality-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-left: auto;
+  padding: 2px 8px;
+}
+
+.quality-badge.quality-good {
+  color: #10b981;
+}
+
+.quality-badge.quality-fair {
+  color: #f59e0b;
+}
+
+.quality-badge.quality-poor {
+  color: #ef4444;
+}
+
+/* ============================================
+   Shortcut Hints
+   ============================================ */
+.shortcut-hint {
+  font-size: 9px;
+  color: #52525b;
+  margin-left: 4px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}
+
+.mute-btn:hover .shortcut-hint,
+.disconnect-btn:hover .shortcut-hint {
+  color: #71717a;
+}
+
+/* ============================================
+   Settings Toggle Button
+   ============================================ */
+.settings-toggle {
+  padding: 4px 8px;
+  border: 1px solid rgba(63, 63, 70, 0.5);
+  background: rgba(9, 9, 11, 0.6);
+  color: #71717a;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1;
+}
+
+.settings-toggle:hover {
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.1);
+  color: #a78bfa;
+}
+
+.settings-toggle.open {
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+/* ============================================
+   Settings Panel
+   ============================================ */
+.settings-panel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease, margin 0.3s ease;
+  opacity: 0;
+  margin-bottom: 0;
+}
+
+.settings-panel.open {
+  max-height: 200px;
+  opacity: 1;
+  margin-bottom: 16px;
+}
+
+.settings-group {
+  padding: 16px;
+  background: rgba(9, 9, 11, 0.6);
+  border: 1px solid rgba(63, 63, 70, 0.5);
+}
+
+.settings-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #a1a1aa;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 12px;
+}
+
+.settings-value {
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-weight: 700;
+  color: #a78bfa;
+  font-size: 12px;
+}
+
+.bitrate-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bitrate-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(63, 63, 70, 0.5);
+  outline: none;
+  cursor: pointer;
+}
+
+.bitrate-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+  cursor: pointer;
+  border: 2px solid rgba(9, 9, 11, 0.8);
+  transition: transform 0.15s;
+}
+
+.bitrate-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.bitrate-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+  cursor: pointer;
+  border: 2px solid rgba(9, 9, 11, 0.8);
+}
+
+.bitrate-range-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #52525b;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  min-width: 24px;
+  text-align: center;
+}
+
+/* ============================================
+   Animations
+   ============================================ */
 @keyframes gridMove {
   0% { transform: translateY(0); }
   100% { transform: translateY(50px); }
