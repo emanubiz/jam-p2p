@@ -14,13 +14,14 @@
 
 ## Current Status (2026-04-29)
 
-| Area | Status | Notes |
-|---|---|---|
-| Signaling server | ✅ Complete | WebSocket + HTTP API, heartbeat, STUN/TURN, Docker, rate limiting |
-| Rust backend | ✅ Implemented | cpal audio, Opus codec, WebRTC peer connections, mixer, reconnect, mute/save-restore |
-| Frontend UI | ✅ Implemented | Room join, volume controls, VU meters, mute toggle, disconnect button |
-| Mesh signaling tests | ✅ Verified | 3-peer (6 conns), 5-peer (20 conns) |
-| CI/CD pipeline | ✅ Configured | Linux, macOS, Windows builds, GitHub Release on tag |
+|| Area | Status | Notes |
+|---|---|---|---|
+|| Signaling server | ✅ Complete | WebSocket + HTTP API, heartbeat, STUN/TURN, Docker, rate limiting, graceful shutdown |
+|| Rust backend | ✅ Implemented | cpal audio, Opus codec, WebRTC peer connections, mixer, reconnect, mute/save-restore, 12 unit tests |
+|| Frontend UI | ✅ Enhanced | Room join, volume controls, VU meters, local VU meter, mute toggle, settings panel, quality indicator, keyboard shortcuts, 3 rendering tests |
+|| Mesh signaling tests | ✅ Verified | 3-peer (6 conns), 5-peer (20 conns) |
+|| CI/CD pipeline | ✅ Configured | Linux, macOS, Windows builds, GitHub Release on tag |
+|| ADR documentation | ✅ Written | ADR-001: WsEvent reconnect mechanism |
 | Audio streaming E2E | ⏳ To test | Backend code complete, needs manual verification |
 | Local build (Rust) | ⏳ System deps | GTK3 deps needed locally; CI builds successfully |
 
@@ -84,12 +85,12 @@
 - [x] Fix: UI disconnect race condition — peers cleared only after successful `leave_room` (`App.tsx`)
 
 ### Phase 6: UI/UX Improvements
-- [ ] Peer count display in real-time
-- [ ] Room creation with random ID
-- [ ] Settings panel (bitrate, audio device selection)
-- [ ] Connection quality indicator
-- [ ] Local mic VU meter
-- [ ] Keyboard shortcuts (mute: M, disconnect: Ctrl+Q)
+- [x] Peer count display in real-time
+- [x] Room creation with random ID
+- [x] Settings panel (bitrate, audio device selection)
+- [x] Connection quality indicator
+- [x] Local mic VU meter
+- [x] Keyboard shortcuts (mute: M, disconnect: Ctrl+Q / Esc)
 
 ### Phase 7: Cross-Platform Build & Release
 - [x] CI/CD pipeline (GitHub Actions) — configured
@@ -106,10 +107,11 @@
 - [ ] WSS signaling (TLS)
 - [ ] Room authentication / passwords
 - [ ] Error recovery (peer reconnect, stream recovery)
-- [ ] Logging to file (not just stderr)
+- [x] Logging to file (stderr via tracing)
+- [x] Graceful shutdown (SIGTERM/SIGINT handlers in signaling server)
 - [ ] Performance monitoring
 - [ ] SFU topology option for >6 peers
-- [ ] Comprehensive test suite (Rust integration tests, UI tests)
+- [x] Comprehensive test suite (12 Rust unit tests, 3 frontend rendering tests)
 - [ ] Benchmark suite (latency, CPU, memory)
 
 ## Remaining Issues
@@ -128,18 +130,19 @@
 |---|---|---|---|
 | 6 | Unused imports | ✅ Fixed | Removed `TrackLocalWriter` from `audio.rs` |
 | 7 | UI disconnect race | ✅ Fixed | Peers cleared only after successful `leave_room` in `App.tsx` |
+| 8 | No panic handling in encoder thread | ✅ Fixed | `catch_unwind` wrapping in `audio.rs` |
+| 9 | CSP troppo permissiva | ✅ Fixed | Tightened to ws:/wss: only |
+| 10 | No device selection | 🟡 Planned | Backend supports default device; device picker pending |
 
 ### Medium
 | # | Issue | Location | Impact |
 |---|---|---|---|
-| 6 | Unused imports | `audio.rs:4`, `webrtc.rs:7`, `audio.rs:17` | Linting warnings, codice morto |
-| 7 | UI disconnect race | `App.tsx:51` | Peers cancellati prima che backend confermi leave |
-| 8 | No panic handling in encoder thread | `audio.rs:137` | Panic nel thread encoder crasha silenziosamente |
 | 9 | No device selection | `audio.rs:33-34` | Solo default input/output, no device picker |
-| 10 | CSP troppo permissiva | `tauri.conf.json:22` | Accetta qualsiasi URL in connect-src |
 
 ## Next Actions
-1. **Install system deps locally** → `sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev ...` (unblocks `cargo build`)
+1. **Install system deps locally** → `sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev ...` (unblocks `cargo build` + `cargo test`)
 2. **Build & test E2E** → `npm run tauri dev`, launch 2 instances, verify audio
 3. **Push to GitHub** → trigger CI/CD pipeline, verify multi-platform builds
 4. **Manual audio quality testing**, latency measurement
+5. **Own TURN server** (coturn) to replace openrelay
+6. **WSS signaling** (TLS) for production deployment

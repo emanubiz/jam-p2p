@@ -29,6 +29,7 @@ function App() {
       });
       const u3 = await listen("disconnected", () => {
         setStatus("disconnected");
+        setLocalLevel(0);
       });
       const u4 = await listen<string>("peer-left", (ev) => {
         setPeers(prev => prev.filter(p => p.id !== ev.payload));
@@ -59,6 +60,8 @@ function App() {
       await invoke("leave_room");
       setPeers([]);
       setStatus("idle");
+      setLocalLevel(0);
+      setBitrate(64);
     } catch (err) {
       setError(String(err));
       setStatus("error");
