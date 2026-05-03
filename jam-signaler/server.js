@@ -113,6 +113,31 @@ httpServer.listen(PORT, () => {
   logger.info({ port: PORT }, 'Signaling server listening');
 });
 
+// Graceful shutdown handlers
+function gracefulShutdown(signal) {
+  logger.info({ signal }, 'Shutdown requested, closing connections...');
+  // Close all WebSocket connections with close code 1001 (going away)
+  wss.clients.forEach(ws => {
+    ws.close(1001, 'Server shutting down');
+  });
+  // Clear peer tracking maps
+  rooms.clear();
+  peers.clear();
+  // Close HTTP server
+  httpServer.close(() => {
+    logger.info('HTTP server closed gracefully');
+    process.exit(0);
+  });
+  // Force kill if shutdown takes too long
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 5000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   let currentRoom = null;
