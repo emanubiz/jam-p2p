@@ -55,10 +55,31 @@ impl PeerManager {
                     if self.peers.contains_key(&pid) {
                         continue;
                     }
-                    let pc = self.create_peer_connection(pid.clone(), ctx).await?;
-                    let offer = pc.create_offer(None).await?;
-                    pc.set_local_description(offer.clone()).await?;
-                    let sdp = serde_json::to_string(&offer).context("failed to serialize offer")?;
+                    let pc = match self.create_peer_connection(pid.clone(), ctx).await {
+                        Ok(pc) => pc,
+                        Err(e) => {
+                            tracing::error!("Failed to create peer connection for {}: {:?}", pid, e);
+                            continue;
+                        }
+                    };
+                    let offer = match pc.create_offer(None).await {
+                        Ok(o) => o,
+                        Err(e) => {
+                            tracing::error!("Failed to create offer for {}: {:?}", pid, e);
+                            continue;
+                        }
+                    };
+                    if let Err(e) = pc.set_local_description(offer.clone()).await {
+                        tracing::error!("Failed to set local description for {}: {:?}", pid, e);
+                        continue;
+                    }
+                    let sdp = match serde_json::to_string(&offer) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!("Failed to serialize offer for {}: {:?}", pid, e);
+                            continue;
+                        }
+                    };
                     let _ = ctx.sig_tx.send(SignalMessage::Offer {
                         target: pid.clone(),
                         sdp,
