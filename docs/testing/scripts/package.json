@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test-all": "node test-mesh-signaling.js && node test-disconnect.js && node test-graceful-shutdown.js"
+  },
   "dependencies": {
     "ws": "^8.20.0"
   }
