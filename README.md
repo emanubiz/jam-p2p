@@ -179,11 +179,16 @@ jam-p2p/
 | Room join UI | ✅ | Server + room input |
 | Volume control per peer | ✅ | Slider 0-100% |
 | VU meter visualization | ✅ | 20-bar LED-style (green/yellow/red) |
+| Local mic VU meter | ✅ | 20-bar blue LED-style |
 | Status indicator | ✅ | idle/joining/connected/disconnected/error |
+| Connection quality badge | ✅ | GOOD/FAIR/POOR indicator |
+| Settings panel (bitrate) | ✅ | Collapsible, 16-192 kbps slider |
 | Mute toggle | ✅ | 🔊 LIVE / 🔇 MUTED |
-| Disconnect button | ✅ | Leave room + cleanup |
-| Tauri commands integration | ✅ | 5 commands |
+| Disconnect button | ✅ | ⏏ with Esc shortcut |
+| Keyboard shortcuts | ✅ | M=mute, Esc=disconnect |
+| Tauri commands integration | ✅ | 6 commands |
 | ESLint + TypeScript strict | ✅ | Configurato |
+| Frontend tests | ✅ | Vitest + 3 rendering tests |
 
 ---
 
@@ -192,6 +197,18 @@ jam-p2p/
 - Il signaling server Node.js è **solo** per lo scambio di messaggi di signaling (Join/Leave/Offer/Answer/ICE). L'audio fluisce direttamente P2P via WebRTC.
 - TURN server pubblico (openrelay.metered.ca) preconfigurato per NAT traversal.
 - Topologia: **full mesh** — adatta per 2-6 peer. Per sessioni più grandi servirebbe SFU.
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `M` | Toggle mute/unmute |
+| `Esc` | Disconnect from room |
+
+### Local Development Notes
+
+- La UI React in browser (`npm run dev`) mostra solo l'interfaccia — le funzionalità audio/WebRTC richiedono Tauri.
+- Per test rapidi della UI senza backend Rust, i comandi Tauri sono mockati nei test con `@tauri-apps/api` mock.
 
 ### Issue notevoli aperti
 
