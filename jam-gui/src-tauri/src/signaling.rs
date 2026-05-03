@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use tokio::time::Duration;
 
 use crate::config::{RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS};
-use crate::messages::SignalMessage;
+use crate::messages::{SignalMessage, WsEvent};
 
 pub struct SignalingClient {
     pub ws_sender: Option<
@@ -16,6 +16,7 @@ pub struct SignalingClient {
     >,
     pub ws_in_tx: mpsc::UnboundedSender<String>,
     pub sig_tx: mpsc::UnboundedSender<SignalMessage>,
+    pub ws_event_tx: mpsc::UnboundedSender<WsEvent>,
     pub last_join: Option<(String, String, String)>,
     pub reconnect_delay: u64,
 }
@@ -24,11 +25,13 @@ impl SignalingClient {
     pub fn new(
         ws_in_tx: mpsc::UnboundedSender<String>,
         sig_tx: mpsc::UnboundedSender<SignalMessage>,
+        ws_event_tx: mpsc::UnboundedSender<WsEvent>,
     ) -> Self {
         SignalingClient {
             ws_sender: None,
             ws_in_tx,
             sig_tx,
+            ws_event_tx,
             last_join: None,
             reconnect_delay: RECONNECT_BASE_DELAY_MS,
         }
@@ -49,6 +52,7 @@ impl SignalingClient {
                 self.last_join = Some((server.to_string(), room.to_string(), name.to_string()));
                 let (write, mut read) = ws.split();
                 let ws_in_tx = self.ws_in_tx.clone();
+                let ws_event_tx = self.ws_event_tx.clone();
 
                 tokio::spawn(async move {
                     while let Some(Ok(msg)) = read.next().await {
@@ -56,6 +60,7 @@ impl SignalingClient {
                             let _ = ws_in_tx.send(t);
                         }
                     }
+                    let _ = ws_event_tx.send(WsEvent::Disconnected);
                 });
 
                 self.ws_sender = Some(write);

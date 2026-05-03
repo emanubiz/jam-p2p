@@ -14,7 +14,8 @@ use tokio::sync::watch;
 use crate::config::{DEFAULT_OPUS_BITRATE, FRAME_SIZE_MS, RING_BUFFER_SIZE_MULT, RTP_PAYLOAD_TYPE};
 use opus::{Application, Bitrate, Channels, Encoder};
 use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use ::webrtc::track::track_local::TrackLocalWriter;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use tauri::{AppHandle, Emitter};
 
 pub type MixerMap = HashMap<String, (HeapCons<f32>, f32)>;
 
@@ -131,10 +132,12 @@ pub fn start_encoder_thread(
     sample_rate: u32,
     samples_per_frame: usize,
     opus_bitrate: Arc<AtomicI32>,
+    handle: AppHandle,
 ) -> EncoderHandle {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     thread::spawn(move || {
+        let result = catch_unwind(AssertUnwindSafe(|| {
         let mut encoder = match Encoder::new(sample_rate, Channels::Mono, Application::Voip) {
             Ok(e) => e,
             Err(e) => {
@@ -147,6 +150,7 @@ pub fn start_encoder_thread(
         let mut out_buf = [0u8; 1024];
         let mut seq: u16 = 0;
         let mut timestamp: u32 = 0;
+        let mut prev_level = 0.0f32;
 
         loop {
             if *shutdown_rx.borrow() {
@@ -192,10 +196,26 @@ pub fn start_encoder_thread(
                     },
                     payload: bytes::Bytes::copy_from_slice(&out_buf[..len]),
                 });
+
+                let level = compute_audio_level(&pcm_buf, prev_level);
+                prev_level = level;
+                let _ = handle.emit("local-level", serde_json::json!({"level": level}));
+
                 seq = seq.wrapping_add(1);
                 timestamp = timestamp.wrapping_add(samples_per_frame as u32);
             }
             pcm_buf.clear();
+        }
+        }));
+        if let Err(panic) = result {
+            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown cause".to_string()
+            };
+            tracing::error!("Encoder thread panicked: {}", msg);
         }
     });
 

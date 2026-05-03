@@ -20,7 +20,7 @@ use ::webrtc::api::APIBuilder;
 use crate::audio::{init_audio, start_encoder_thread};
 use crate::config::default_ice_servers;
 use crate::logger::init_tracing;
-use crate::messages::{AppCommand, SignalMessage};
+use crate::messages::{AppCommand, SignalMessage, WsEvent};
 use crate::signaling::SignalingClient;
 use crate::state::init_state;
 use crate::webrtc::{PeerManager, WebrtcContext};
@@ -87,10 +87,12 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
         audio.sample_rate,
         audio.samples_per_frame,
         opus_bitrate.clone(),
+        handle.clone(),
     );
 
     let (sig_tx, mut sig_rx) = mpsc::unbounded_channel::<SignalMessage>();
     let (ws_in_tx, mut ws_in_rx) = mpsc::unbounded_channel::<String>();
+    let (ws_event_tx, mut ws_event_rx) = mpsc::unbounded_channel::<WsEvent>();
 
     let ctx = WebrtcContext {
         api,
@@ -104,7 +106,7 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
     };
 
     let mut peer_manager = PeerManager::new();
-    let mut sig_client = SignalingClient::new(ws_in_tx, sig_tx.clone());
+    let mut sig_client = SignalingClient::new(ws_in_tx, sig_tx.clone(), ws_event_tx);
     let mut my_id: Option<String> = None;
 
     loop {
@@ -178,22 +180,19 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
                     }
                 }
             }
-            else => {
-                // ws_in_rx closed — connection dropped unexpectedly
+            Some(_) = ws_event_rx.recv() => {
+                // WS connection dropped — handle reconnect
                 let _ = handle.emit("disconnected", ());
                 peer_manager.close_all(&handle).await;
-                // Only reconnect if user didn't explicitly leave (last_join still set)
                 if sig_client.should_reconnect() {
                     let delay = sig_client.backoff_delay();
                     tracing::info!("Reconnecting in {}ms", delay.as_millis());
                     tokio::time::sleep(delay).await;
-                    // Reconnect uses stored last_join internally
                     let (res_tx, _) = tokio::sync::oneshot::channel();
                     if let Some((server, room, name)) = sig_client.last_join.clone() {
                         sig_client.connect(&server, &room, &name, res_tx).await;
                     }
                 } else {
-                    // Explicit leave — clear state
                     my_id = None;
                 }
             }
