@@ -698,6 +698,43 @@ body {
 }
 
 /* ============================================
+   Room Badge
+   ============================================ */
+.room-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: rgba(9, 9, 11, 0.4);
+  border: 1px solid rgba(63, 63, 70, 0.3);
+  font-size: 11px;
+}
+
+.room-badge-label {
+  color: #52525b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.room-badge-name {
+  color: #a78bfa;
+  font-weight: 700;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.room-badge-peers {
+  margin-left: auto;
+  color: #71717a;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ============================================
    Settings Toggle Button
    ============================================ */
 .settings-toggle {

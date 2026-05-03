@@ -207,6 +207,11 @@ function App() {
 
           {status === "connected" && (
             <div className="mixer-section">
+              <div className="room-badge">
+                <span className="room-badge-label">ROOM</span>
+                <span className="room-badge-name">{room}</span>
+                <span className="room-badge-peers">{peers.length + 1} participant{(peers.length + 1) !== 1 ? 's' : ''}</span>
+              </div>
               <div className="mixer-header">
                 <h3 className="mixer-title">Active Channels</h3>
                 <div className="mixer-controls">
