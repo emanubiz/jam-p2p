@@ -252,7 +252,12 @@ mod tests {
     fn test_compute_audio_level_full_scale() {
         let samples = vec![1.0f32; 100];
         let level = compute_audio_level(&samples, 0.0);
-        assert!(level > 0.9);
+        // EMA with prev_level=0: 0.3 * 1.0 + 0.7 * 0.0 = 0.3
+        assert!(
+            (level - 0.3).abs() < 0.01,
+            "expected ~0.3 (EMA from 0), got {}",
+            level
+        );
     }
 
     #[test]
@@ -274,31 +279,91 @@ mod tests {
     fn test_alternating_signal() {
         let samples: Vec<f32> = (0..100).map(|i| if i % 2 == 0 { 0.5 } else { -0.5 }).collect();
         let level = compute_audio_level(&samples, 0.0);
-        assert!(level > 0.01, "alternating signal should produce non-zero level");
-        assert!(level < 0.99, "alternating signal should not be near max");
+        assert!(
+            level > 0.01,
+            "alternating signal should produce non-zero level"
+        );
+        assert!(
+            level < 0.99,
+            "alternating signal should not be near max"
+        );
     }
 
     #[test]
-    fn test_ema_convergence() {
+    fn test_alternating_full_scale() {
+        // Alternating +1.0/-1.0 has same RMS as constant 1.0
+        let samples: Vec<f32> = (0..100).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let level = compute_audio_level(&samples, 0.0);
+        assert!(
+            (level - 0.3).abs() < 0.01,
+            "alternating +/-1 should give ~0.3, got {}",
+            level
+        );
+    }
+
+    #[test]
+    fn test_ema_convergence_steady_state() {
+        // With constant input, EMA should converge to steady state = norm
         let samples = vec![0.3f32; 100];
-        let mut level = compute_audio_level(&samples, 0.0);
+        let mut prev = compute_audio_level(&samples, 0.0);
         for _ in 0..50 {
-            let new = compute_audio_level(&samples, level);
-            // EMA should approach steady state
-            assert!((new - level).abs() <= (level - compute_audio_level(&samples, 0.0)).abs() + 0.001
-                || level > 0.9 * new);
-            level = new;
+            let next = compute_audio_level(&samples, prev);
+            let delta = (next - prev).abs();
+            assert!(delta < 0.18, "EMA delta should shrink, got {}", delta);
+            prev = next;
         }
-        // Should have converged near steady state
-        let final_level = compute_audio_level(&samples, level);
-        assert!((final_level - level).abs() < 0.001, "EMA should converge");
+        // Verify near steady state
+        let next = compute_audio_level(&samples, prev);
+        assert!(
+            (next - prev).abs() < 0.001,
+            "EMA should converge to steady state"
+        );
+    }
+
+    #[test]
+    fn test_ema_decay_to_silence() {
+        // From high prev_level, EMA should exponentially decay toward 0 on silence
+        let silence = vec![0.0f32; 100];
+        let mut level = 0.8f32;
+        for _ in 0..20 {
+            level = compute_audio_level(&silence, level);
+        }
+        // 0.8 * (1-α)^20 = 0.8 * 0.7^20 ≈ 0.00064
+        assert!(level < 0.01, "EMA should decay to near 0, got {}", level);
+    }
+
+    #[test]
+    fn test_ema_rise_to_full() {
+        // From 0, EMA should exponentially rise toward steady state of 1.0
+        let full = vec![1.0f32; 100];
+        let mut level = 0.0f32;
+        for _ in 0..20 {
+            level = compute_audio_level(&full, level);
+        }
+        // 1.0 - 0.7^20 ≈ 0.9992
+        assert!(
+            level > 0.99,
+            "EMA should converge near 1.0, got {}",
+            level
+        );
     }
 
     #[test]
     fn test_clipping_max_amplitude() {
-        let samples = vec![1.0f32; 100];
+        // Values > 1.0 simulate clipping — norm clamps to [0, 1]
+        let samples = vec![2.0f32; 100];
         let level = compute_audio_level(&samples, 0.0);
-        assert!(level > 0.95, "max amplitude should produce near-max level");
+        assert!(
+            (0.0..=1.0).contains(&level),
+            "clipped level must be in [0,1], got {}",
+            level
+        );
+        // RMS=2.0 → dB≈6.02 → norm=1.1003 → clamped to 1.0 → EMA→0.3
+        assert!(
+            (level - 0.3).abs() < 0.01,
+            "clipped(2.0) with prev=0 should be ~0.3, got {}",
+            level
+        );
     }
 
     #[test]
@@ -306,22 +371,59 @@ mod tests {
         let samples = vec![0.5f32; 1];
         let level = compute_audio_level(&samples, 0.0);
         assert!(!level.is_nan(), "single sample should not produce NaN");
-        assert!(level > 0.0, "single sample should produce positive level");
+        assert!(
+            level > 0.0,
+            "single sample should produce positive level"
+        );
+    }
+
+    #[test]
+    fn test_short_buffer_two_samples() {
+        let level = compute_audio_level(&[0.25f32, 0.75f32], 0.0);
+        assert!(!level.is_nan());
+        assert!((0.0..=1.0).contains(&level));
+    }
+
+    #[test]
+    fn test_short_buffer_mixed_polarity() {
+        let level = compute_audio_level(&[-0.5f32, 0.0f32, 0.5f32], 0.0);
+        assert!(!level.is_nan());
+        assert!((0.0..=1.0).contains(&level));
     }
 
     #[test]
     fn test_very_quiet_signal() {
         let samples = vec![1e-6f32; 100];
         let level = compute_audio_level(&samples, 0.0);
-        assert!(level < 0.01, "very quiet signal should produce near-zero level");
+        assert!(
+            level < 0.01,
+            "very quiet signal should produce near-zero level"
+        );
     }
 
     #[test]
     fn test_infinity_safety() {
         let samples = vec![f32::INFINITY; 100];
         let level = compute_audio_level(&samples, 0.0);
-        assert!(level.is_finite(), "infinity input should not cause NaN/inf");
-        assert!(level >= 0.0 && level <= 1.0, "level must be in [0,1] range");
+        assert!(
+            level.is_finite(),
+            "infinity input should not cause NaN/inf"
+        );
+        assert!(
+            level >= 0.0 && level <= 1.0,
+            "level must be in [0,1] range"
+        );
+    }
+
+    #[test]
+    fn test_extreme_values() {
+        // Very tiny signal
+        let level = compute_audio_level(&[1e-10f32; 100], 0.0);
+        assert!((0.0..=1.0).contains(&level));
+
+        // Very huge signal
+        let level = compute_audio_level(&[1e10f32; 100], 0.0);
+        assert!((0.0..=1.0).contains(&level));
     }
 
     #[test]
@@ -330,7 +432,10 @@ mod tests {
         let samples = vec![0.3f32; 50];
         let level_low = compute_audio_level(&samples, 0.0);
         let level_high = compute_audio_level(&samples, 0.5);
-        assert!(level_high >= level_low, "higher prev_level should preserve ordering");
+        assert!(
+            level_high >= level_low,
+            "higher prev_level should preserve ordering"
+        );
     }
 
     #[test]
@@ -338,5 +443,9 @@ mod tests {
         let samples: Vec<f32> = vec![];
         let level = compute_audio_level(&samples, 0.0);
         assert!(!level.is_nan(), "empty buffer should not produce NaN");
+        assert!(
+            (0.0..=1.0).contains(&level),
+            "empty buffer level should be in [0,1]"
+        );
     }
 }
