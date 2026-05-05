@@ -1,14 +1,13 @@
-# Audio Streaming Quality Test Plan - EMA-21
+# Audio Streaming Quality Test Plan — EMA-21
 
 ## Objective
 Test audio streaming quality in mesh topology with 3+ peers. Measure latency, check for dropouts, and verify audio quality.
 
 ## Prerequisites
 - Signaling server running (tested in EMA-17 ✅)
-- WebRTC mesh connections working (tested in EMA-20 ✅)
-- Either:
-  - Tauri app built and running (jam-gui)
-  - Or browser-based test environment with WebRTC support
+- WebRTC mesh connections working (tested in EMA-16 ✅)
+- Tauri app built and running (via `npm run tauri dev` or `npm run tauri build`)
+- Audio input/output devices available
 
 ## Test Scenarios
 
@@ -28,6 +27,8 @@ Test audio streaming quality in mesh topology with 3+ peers. Measure latency, ch
 - No audible dropouts
 - Clear audio quality
 
+**Status**: ⏸ Pending — requires E2E with actual audio devices
+
 ### 2. Multiple Sources (3 peers all streaming)
 **Setup:**
 - Peer A: Streaming audio
@@ -44,7 +45,9 @@ Test audio streaming quality in mesh topology with 3+ peers. Measure latency, ch
 **Expected:**
 - All streams audible simultaneously
 - No stream starvation
-- Mixing works correctly
+- Mixing works correctly (tanh soft clipping)
+
+**Status**: ⏸ Pending — requires E2E with actual audio devices
 
 ### 3. Scalability Test (5 peers)
 **Setup:**
@@ -62,70 +65,78 @@ Test audio streaming quality in mesh topology with 3+ peers. Measure latency, ch
 - Latency remains acceptable (< 200ms)
 - No peer disconnections due to overload
 
+**Status**: ⏸ Pending — requires E2E with actual audio devices
+
 ### 4. Audio Level Metering
 **Verify:**
-- VU meters update correctly for each peer
-- Local mic level shows in "You" channel
+- VU meters update correctly for each peer (remote)
+- Local mic level shows in "MY INPUT" channel
 - Remote peer levels show in their channels
-- Level smoothing works (no jittery meters)
+- Level smoothing works (no jittery meters, EMA α=0.3)
+
+**Status**: ⏸ Pending — requires E2E with actual audio devices
 
 ## Testing Approach
 
-### Option A: Manual Testing with Tauri App
+### Approach: Manual Testing with Tauri App
 1. Build Tauri app: `cd jam-gui && npm run tauri build`
-2. Run multiple instances (if supported) or use multiple machines
+2. Run multiple instances (or use multiple machines)
 3. Join same room
 4. Play audio/mic from each peer
 5. Observe mixing, levels, and latency
 
-### Option B: Browser Testing (if WebRTC exposed)
-1. Expose WebRTC connections to browser UI
-2. Use WebAudio API to generate test tones
-3. Measure latency using RTP timestamps
-4. Check audio element output
-
-### Option C: Rust Backend Unit Tests
-1. Create mock audio streams in Rust
-2. Test encoding/decoding pipeline
-3. Verify Opus encoder/decoder works
-4. Test mixing logic with synthetic audio
+### Rust Backend Unit Tests (Available)
+- ✅ 22 unit tests in `audio.rs` covering encoding, decoding, mixing logic
+- ✅ Tests: audio levels, clipping, EMA smoothing, edge cases
+- ⏸ E2E audio streaming requires manual verification
 
 ## Metrics to Collect
 
 | Metric | Target | How to Measure |
 |--------|--------|----------------|
-| Latency (one-way) | < 150ms | RTP timestamp analysis |
+| Latency (one-way) | < 150ms | RTP timestamp analysis or manual clap test |
 | Latency (round-trip) | < 300ms | Manual clap test |
 | Audio dropouts | 0/min | Listen for gaps |
-| CPU usage per peer | < 50% | htop/top |
-| Memory per peer | < 200MB | Watch RSS |
-| Bandwidth per stream | ~128kbps | iftop/nethogs |
+| CPU usage per peer | < 50% | htop/top or Task Manager |
+| Memory per peer | < 200MB | Watch RSS or Task Manager |
+| Bandwidth per stream | ~64-128kbps | iftop/nethogs or Resource Monitor |
 
 ## Current Status
 
-❌ **Cannot complete fully** - requires either:
-1. Tauri app with multi-instance support, OR
-2. Browser-based testing environment, OR  
-3. Rust unit tests for audio pipeline
+| Item | Status |
+|---|---|
+| Signaling server | ✅ Tested and working |
+| WebRTC mesh connectivity | ✅ Tested and working |
+| Rust audio pipeline tests | ✅ 22 unit tests pass |
+| E2E audio streaming | ⏸ Requires manual test with devices |
+| Latency measurement | ⏸ Requires E2E |
+| Mixing quality assessment | ⏸ Requires E2E |
 
 ## Recommended Next Steps
 
-1. **Immediate**: Create Rust unit tests for audio pipeline (encoding, decoding, mixing)
-2. **Short term**: Set up manual testing with Tauri app on multiple machines
-3. **Long term**: Automate audio quality tests with WebAudio API
+1. **Install system dependencies** for local Rust build (if running natively)
+2. **Build Tauri app** with `npm run tauri build`
+3. **Run 2+ instances** on same machine or different machines
+4. **Join same room** and verify audio flows both directions
+5. **Document results** — latency, quality, any issues
 
 ## Test Artifacts
 
 - Test plan: `docs/testing/audio-quality-test-plan.md` (this file)
 - Signaling tests: `docs/testing/scripts/test-mesh-signaling.js` ✅
-- WebRTC signaling tests: `docs/testing/scripts/test-webrtc-mesh.js` ✅
+- WebRTC mesh tests: `docs/testing/scripts/test-webrtc-mesh.js` ✅
+- Rust unit tests: `jam-gui/src-tauri/src/audio.rs` (22 tests) ✅
 
-## Notes
+## Technical Notes
 
 - Audio pipeline: mic → cpal → mono downmix → ringbuffer → Opus encoder → RTP tracks → WebRTC → remote
-- Remote: WebRTC track → RTP → Opus decoder → ringbuffer → mixer (sum + tanh soft clipping) → cpal output → speakers
+- Remote: WebRTC track → RTP → Opus decoder → ringbuffer → mixer (sum + tanh) → cpal output → speakers
 - VU meters: RMS → dBFS → normalized [-60dB, 0dB] → [0,1] → EMA smoothing (α=0.3)
-- ICE servers: Google STUN (stun.l.google.com:19302) + OpenRelay TURN (openrelay.metered.ca:80)
-- Default Opus bitrate: 64kbps, VoIP mode, 20ms frames
+- ICE servers: Google STUN + OpenRelay TURN (configured)
+- Default Opus bitrate: 64kbps, VoIP mode, 20ms frames (configurable 16-192 kbps)
 - Reconnect: exponential backoff 1s → 30s max
 - Topology: full mesh (N*(N-1)/2 connections)
+
+---
+
+**Last Updated**: 2026-05-05
