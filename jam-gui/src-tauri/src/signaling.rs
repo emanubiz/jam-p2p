@@ -2,6 +2,8 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
+use tokio::sync::watch;
+
 use crate::config::{RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS};
 use crate::messages::{SignalMessage, WsEvent};
 
@@ -19,6 +21,7 @@ pub struct SignalingClient {
     pub ws_event_tx: mpsc::UnboundedSender<WsEvent>,
     pub last_join: Option<(String, String, String)>,
     pub reconnect_delay: u64,
+    shutdown_rx: watch::Receiver<bool>,
 }
 
 impl SignalingClient {
@@ -26,6 +29,7 @@ impl SignalingClient {
         ws_in_tx: mpsc::UnboundedSender<String>,
         sig_tx: mpsc::UnboundedSender<SignalMessage>,
         ws_event_tx: mpsc::UnboundedSender<WsEvent>,
+        shutdown_rx: watch::Receiver<bool>,
     ) -> Self {
         SignalingClient {
             ws_sender: None,
@@ -34,6 +38,7 @@ impl SignalingClient {
             ws_event_tx,
             last_join: None,
             reconnect_delay: RECONNECT_BASE_DELAY_MS,
+            shutdown_rx,
         }
     }
 
@@ -54,10 +59,23 @@ impl SignalingClient {
                 let ws_in_tx = self.ws_in_tx.clone();
                 let ws_event_tx = self.ws_event_tx.clone();
 
+                let mut shutdown_rx = self.shutdown_rx.clone();
                 tokio::spawn(async move {
-                    while let Some(Ok(msg)) = read.next().await {
-                        if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
-                            let _ = ws_in_tx.send(t);
+                    loop {
+                        tokio::select! {
+                            biased;
+                            _ = shutdown_rx.changed() => {
+                                tracing::info!("WS reader shutting down");
+                                break;
+                            }
+                            msg = read.next() => {
+                                match msg {
+                                    Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => {
+                                        let _ = ws_in_tx.send(t);
+                                    }
+                                    _ => break,
+                                }
+                            }
                         }
                     }
                     let _ = ws_event_tx.send(WsEvent::Disconnected);
@@ -72,7 +90,7 @@ impl SignalingClient {
             }
             Err(e) => {
                 tracing::warn!("Connection failed: {:?}", e);
-                let _ = res_tx.send(Err(format!("Connessione fallita: {}", e)));
+                let _ = res_tx.send(Err(format!("Connection failed: {}", e)));
             }
         }
     }

@@ -1,18 +1,95 @@
 # Jam P2P
 
-Low-latency peer-to-peer audio jamming application for musicians. Built with a Rust + WebRTC backend and a React + Tauri v2 frontend.
+Low-latency peer-to-peer audio jam sessions for musicians, built with Tauri v2, React, and Rust.
 
-## Overview
+Jam P2P lets musicians connect over the internet and play together in real time. Audio streams directly between peers via WebRTC — no central server relays audio. A lightweight signaling server coordinates the initial connection, then gets out of the way.
 
-- **Frontend UI**: `jam-gui/` — React 19 + Vite + Tauri v2
-- **Native Backend**: `jam-gui/src-tauri/` — Rust (cpal, Opus, webrtc-rs, WebSocket signaling)
-- **Signaling Server**: `jam-signaler/` — Node.js + `ws` (WebSocket + HTTP API)
-
-The Rust backend handles audio capture/playback, Opus codec, and WebRTC peer connections. The React UI communicates with the backend via Tauri Commands and Events for seamless desktop integration.
+```
+┌──────────────┐   WebSocket   ┌──────────────────┐   WebSocket   ┌──────────────┐
+│   Peer A     │◄────────────►│  Signaling Server │◄────────────►│   Peer B     │
+│  (Tauri+Rust)│               │  (Node.js + ws)  │               │  (Tauri+Rust)│
+└──────┬───────┘               └──────────────────┘               └──────┬───────┘
+       │                                                                 │
+       │              WebRTC (Opus audio via RTP tracks)                 │
+       └─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Development Requirements
+## Features
+
+- **Real-time P2P audio** — WebRTC mesh with Opus codec, 20ms frames, configurable bitrate (16–192 kbps)
+- **Multi-peer mixer** — Ringbuffer-based mixing with tanh soft clipping for distortion-free output
+- **VU meters** — Per-peer LED-style level meters with EMA smoothing (throttled to 15 Hz)
+- **Mute/unmute** — Volume save/restore per peer
+- **Reconnect** — Automatic exponential backoff (1s → 30s max) on connection drops
+- **Graceful shutdown** — Clean teardown of encoder, peer connections, and signaling on app exit
+- **Settings panel** — Adjustable Opus bitrate while connected
+- **Keyboard shortcuts** — `M` to mute, `Esc` to disconnect
+- **Cross-platform** — Linux (.deb, AppImage), macOS (.dmg), Windows (.msi, .exe) via CI/CD
+- **Docker-ready signaling server** — Single `docker compose up` to deploy
+
+---
+
+## Architecture
+
+```
+jam-p2p/
+├── jam-gui/                          # Frontend + Backend
+│   ├── src/                          # React UI (TypeScript)
+│   │   ├── App.tsx                   # Root component (compositor)
+│   │   ├── hooks/
+│   │   │   └── useTauriEvents.ts     # Tauri event listener hook
+│   │   ├── components/
+│   │   │   ├── ConnectionForm.tsx    # Server/room input + connect button
+│   │   │   ├── PeerCard.tsx          # Single peer: name, volume slider, VU
+│   │   │   ├── VuMeter.tsx           # 20-bar LED-style level meter
+│   │   │   ├── LocalMicCard.tsx      # Local microphone VU display
+│   │   │   ├── SettingsPanel.tsx     # Bitrate slider
+│   │   │   └── StatusBar.tsx         # Connection status + quality badge
+│   │   ├── types.ts                  # TypeScript type definitions
+│   │   └── main.tsx                  # React entry point
+│   └── src-tauri/                    # Rust backend
+│       └── src/
+│           ├── main.rs               # Entry point, Tauri setup, event loop
+│           ├── audio.rs              # cpal I/O, Opus encoder/decoder, mixer, VU
+│           ├── webrtc.rs             # PeerConnection management, track handling
+│           ├── signaling.rs          # WebSocket client with reconnect
+│           ├── state.rs              # Tauri commands (join, leave, volume, mute)
+│           ├── messages.rs           # SignalMessage + AppCommand enums
+│           ├── config.rs             # Constants, ICE server configuration
+│           └── logger.rs             # Tracing/logging initialization
+├── jam-signaler/                     # Signaling server (Node.js)
+│   └── server.js                     # WebSocket + HTTP API
+├── docs/                             # Documentation
+│   ├── architecture/
+│   │   ├── system-overview.md        # Detailed architecture doc
+│   │   └── decisions/               # Architecture Decision Records
+│   └── testing/                      # Test plans and scripts
+└── .github/workflows/build.yml       # CI/CD pipeline
+```
+
+### Data Flow
+
+```
+Microphone ──► cpal capture ──► mono downmix ──► ringbuffer
+                                                      │
+                                               Opus encoder (20ms frames)
+                                                      │
+                                               RTP packets ──► WebRTC track ──► Peer
+
+Peer ──► WebRTC track ──► RTP packets ──► Opus decoder ──► PCM samples
+                                                                  │
+                                                         ringbuffer (per peer)
+                                                                  │
+                                                          Mixer (sum + tanh)
+                                                                  │
+                                                    cpal output ──► Speakers
+```
+
+---
+
+## Requirements
 
 | Dependency | Minimum Version |
 |---|---|
@@ -20,29 +97,28 @@ The Rust backend handles audio capture/playback, Opus codec, and WebRTC peer con
 | Rust | >= 1.70 (stable toolchain) |
 | Tauri CLI | v2 |
 
-### Linux (Ubuntu/Debian)
+### System Dependencies
 
+**Linux (Ubuntu/Debian):**
 ```bash
 sudo apt install libpango1.0-dev libcairo2-dev libglib2.0-dev libatk1.0-dev \
   libgdk-pixbuf2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
   librsvg2-dev patchelf libasound2-dev pkg-config build-essential
 ```
 
-### macOS
-
+**macOS:**
 ```bash
 brew install cmake
 ```
 
-### Windows
-
-Visual Studio Build Tools + WebView2 runtime. See [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+**Windows:**
+Visual Studio Build Tools + [WebView2 runtime](https://tauri.app/start/prerequisites/).
 
 ---
 
-## Quickstart
+## Quick Start
 
-### 1. Install frontend dependencies
+### 1. Install dependencies
 
 ```bash
 cd jam-gui && npm install
@@ -54,16 +130,16 @@ cd jam-gui && npm install
 cd jam-signaler && npm install && npm start
 ```
 
-Server runs at `ws://localhost:8080`
+Server runs on `ws://localhost:8080`.
 
-### 3. Run the app in dev mode
+### 3. Run the app
 
-**UI only (browser):**
+**Browser (UI only, no audio):**
 ```bash
 cd jam-gui && npm run dev
 ```
 
-**Tauri desktop (requires native tooling):**
+**Desktop (full audio + WebRTC):**
 ```bash
 cd jam-gui && npm run tauri dev
 ```
@@ -72,157 +148,196 @@ cd jam-gui && npm run tauri dev
 
 ```bash
 cd jam-signaler
-npm install && npm run build   # compile with ncc
+npm install && npm run build
 docker compose up --build
 ```
 
 ---
 
-## Production / Build
+## Production Build
 
-### Frontend
-
+**Frontend:**
 ```bash
 cd jam-gui && npm run build
 ```
 
-### Tauri bundle (all platforms)
-
+**Desktop bundle (all platforms):**
 ```bash
 cd jam-gui && npm run tauri build
 ```
 
-### CI/CD
-
-The `.github/workflows/build.yml` workflow automatically builds for:
-- Linux (AppImage + .deb)
-- macOS Intel & Apple Silicon (.dmg + .app)
-- Windows (.msi + .exe)
-
-Tags `v*` trigger a GitHub Release with all artifacts.
+**CI/CD** (`.github/workflows/build.yml`) automatically builds for Linux, macOS (Intel + Apple Silicon), and Windows. Tags matching `v*` trigger a GitHub Release with all artifacts.
 
 ---
 
-## Repository Structure
+## Signaling Server
+
+The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC connections. It does **not** relay audio — that flows directly P2P.
+
+### Protocol
+
+| Direction | Type | Payload |
+|---|---|---|
+| Server → Client | `Welcome` | `{ uuid, iceServers }` |
+| Server → Client | `PeerList` | `{ peers: string[] }` |
+| Server → Client | `NewPeer` | `{ uuid }` |
+| Server → Client | `PeerLeft` | `{ uuid }` |
+| Client → Server | `Join` | `{ room, name }` |
+| Client → Server | `Leave` | — |
+| Bidirectional | `Offer` | `{ target/from, sdp }` |
+| Bidirectional | `Answer` | `{ target/from, sdp }` |
+| Bidirectional | `Ice` | `{ target/from, candidate }` |
+
+### HTTP API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Server health (room count, peer count, uptime) |
+| `/ice-servers` | GET | STUN/TURN configuration |
+| `/room/:name` | GET | Room info (peer count, peer IDs) |
+
+### Security
+
+- Rate limiting: 50 msg/sec per WebSocket connection, 100 req/sec per IP on HTTP
+- Message size limit: 64 KB
+- Message structure validation (type + required fields)
+- Room name validation (non-empty, max 64 chars)
+- Graceful shutdown on SIGTERM/SIGINT
+
+---
+
+## Rust Backend
+
+### Tauri Commands (Frontend → Rust)
+
+| Command | Params | Returns | Description |
+|---|---|---|---|
+| `join_room` | `{ room, name, server }` | `Result<(), String>` | Join a room (guards: not already connected) |
+| `leave_room` | — | `Result<(), String>` | Leave current room (guards: must be connected) |
+| `set_volume` | `{ peer_id, vol }` | `Result<(), String>` | Set per-peer volume (0.0–1.0) |
+| `set_opus_bitrate` | `{ bitrate }` | `Result<(), String>` | Set encoder bitrate (16000–192000 bps) |
+| `set_muted` | `{ muted }` | `Result<(), String>` | Mute/unmute with volume save/restore |
+
+### Tauri Events (Rust → Frontend)
+
+| Event | Payload | Description |
+|---|---|---|
+| `peer-joined` | `string` | New peer connected |
+| `peer-left` | `string` | Peer disconnected |
+| `peer-level` | `{ id, level }` | Peer audio level (0.0–1.0, EMA smoothed) |
+| `local-level` | `{ level }` | Local mic level (0.0–1.0, EMA smoothed) |
+| `disconnected` | — | WebSocket connection dropped |
+
+### Key Design Decisions
+
+- **WebRTC via Rust (webrtc-rs)** — Lower latency than browser WebRTC, direct audio pipeline access
+- **RTP tracks** — Audio streams via RTP (not data channels), native to the WebRTC media pipeline
+- **Opus VoIP mode** — 64 kbps default, 20ms frames, optimized for speech/music
+- **Full mesh** — Every peer connects to every other peer. Simple, lowest latency. Suitable for 2–6 peers.
+- **Soft clipping (tanh)** — Prevents harsh distortion when multiple streams are summed
+
+### Configuration (`config.rs`)
+
+| Constant | Value | Description |
+|---|---|---|
+| `FRAME_SIZE_MS` | 20 | Opus frame size in milliseconds |
+| `DEFAULT_OPUS_BITRATE` | 64000 | Default encoder bitrate (bps) |
+| `EMA_ALPHA` | 0.3 | VU meter smoothing factor |
+| `VU_THROTTLE_MS` | 67 | VU meter event throttle (~15 Hz) |
+| `RECONNECT_BASE_DELAY_MS` | 1000 | Initial reconnect delay |
+| `RECONNECT_MAX_DELAY_MS` | 30000 | Maximum reconnect delay |
+| `RING_BUFFER_SIZE_MULT` | 4 | Ring buffer size multiplier |
+
+---
+
+## Frontend
+
+### Component Architecture
 
 ```
-jam-p2p/
-├── jam-gui/                    # React UI + Tauri v2
-│   ├── src/
-│   │   ├── App.tsx             # Main UI (room join, mixer, VU meters, settings)
-│   │   ├── App.css             # Styles
-│   │   ├── types.ts            # TypeScript types
-│   │   ├── App.test.tsx        # 3 frontend rendering tests (Vitest)
-│   │   └── main.tsx            # Entry point
-│   └── src-tauri/              # Rust backend (modular)
-│       ├── src/
-│       │   ├── main.rs         # Entry point, Tauri setup, backend event loop (~188 lines)
-│       │   ├── audio.rs        # cpal I/O, Opus encoder, mixer, VU calculation, 22 unit tests
-│       │   ├── webrtc.rs       # PeerConnection creation, signal handler, track management
-│       │   ├── signaling.rs    # WebSocket client, reconnect with exponential backoff
-│       │   ├── state.rs        # Tauri state + commands (join, leave, volume, bitrate, mute)
-│       │   ├── messages.rs     # SignalMessage + AppCommand + WsEvent enums
-│       │   ├── config.rs       # Constants, ICE server configuration
-│       │   └── logger.rs       # Tracing/logging initialization
-│       ├── Cargo.toml
-│       └── tauri.conf.json
-├── jam-signaler/               # Signaling server (Node.js)
-│   ├── server.js               # WebSocket + HTTP API, rate limiting, message validation
-│   ├── Dockerfile
-│   └── docker-compose.yml
-├── .github/workflows/
-│   └── build.yml               # Multi-platform CI/CD
-└── docs/
-    ├── architecture/           # Architecture docs & ADRs
-│   │   ├── system-overview.md  # Full system architecture
-│   │   └── decisions/          # Architecture Decision Records
-    ├── testing/                # Test plans & verification results
-│   │   ├── mesh-verification-plan.md   # Mesh topology verification
-│   │   ├── multi-peer-mesh-test-plan.md # Multi-peer test plan
-│   │   ├── audio-quality-test-plan.md   # Audio quality test plan
-│   │   └── scripts/             # Automated test scripts
-    ├── ROADMAP.md               # Development roadmap
-    └── .cron-state.md           # Development progress log
+App.tsx
+├── ConnectionForm     — Server/room inputs + connect button
+├── StatusBar          — Status dot + text + quality badge
+├── SettingsPanel      — Bitrate slider (collapsible)
+├── LocalMicCard       — Local mic VU meter
+├── PeerCard[]         — Per-peer: name, volume slider, VU meter
+│   └── VuMeter        — 20-bar LED-style level display (20 bars, green/blue)
+└── hooks/useTauriEvents() — Hook managing 5 Tauri event listeners
+    └── Returns { peers, localLevel, disconnected, updatePeerVolume, ... }
 ```
 
----
+All peer-facing components use `React.memo` to minimize re-renders.
 
-## Features
-
-### Backend Rust (src-tauri)
-
-| Feature | Status | Notes |
-|---|---|---|
-| Audio capture (cpal) | ✅ Implemented | Mono/stereo automatic downmix |
-| Opus codec (encoder/decoder) | ✅ Implemented | VoIP mode, configurable bitrate 16-192 kbps |
-| WebRTC peer connections (webrtc-rs 0.11) | ✅ Implemented | Full mesh via RTP tracks |
-| Signaling WebSocket client | ✅ Implemented | Reconnect with exponential backoff 1s → 30s max |
-| Multi-peer audio mixer | ✅ Implemented | Ringbuffer + tanh soft clipping |
-| VU meter via Tauri events | ✅ Implemented | RMS → dBFS → EMA smoothing |
-| Mute/Unmute with save/restore | ✅ Implemented | Volume state persisted |
-| Encoder graceful shutdown | ✅ Implemented | Watch channel for clean shutdown |
-| Double join guard | ✅ Implemented | `connected` atomic flag |
-| Rate limiting signaling | ✅ Implemented | 50 msg/sec, max 64KB |
-| NewPeer auto-handling | ✅ Implemented | Auto-creates PC + sends Offer |
-| WebSocket reconnect (WsEvent channel) | ✅ Implemented | Dedicated lifecycle channel |
-| PeerLeft signaling cleanup | ✅ Implemented | Immediate cleanup + UI event |
-| STUN + TURN (openrelay) | ✅ Configured | NAT traversal ready |
-| Clippy lint configuration | ✅ Configured | `unwrap_used`, `expect_used`, `pedantic` warnings |
-| Unit tests | ✅ 22 tests | Audio level, clipping, EMA, edge cases |
-
-### Signaling Server (jam-signaler)
-
-| Feature | Status | Notes |
-|---|---|---|
-| WebSocket signaling | ✅ | Join/Leave/Offer/Answer/ICE |
-| Heartbeat 30s ping/pong | ✅ | Dead peer detection |
-| HTTP API (`/health`, `/ice-servers`, `/room/:name`) | ✅ | GET only, CORS enabled |
-| STUN + TURN config | ✅ | Google STUN + OpenRelay TURN |
-| Graceful disconnect + PeerLeft | ✅ | Empty room cleanup |
-| Docker deployment | ✅ | Dockerfile + docker-compose |
-| Rate limiting | ✅ | 50 msg/sec per connection |
-| Message size limit | ✅ | Max 64KB |
-| Input validation | ✅ | Room name validation |
-
-### Frontend (jam-gui)
-
-| Feature | Status | Notes |
-|---|---|---|
-| Room join UI | ✅ | Server + room input |
-| Volume control per peer | ✅ | Slider 0-100% |
-| VU meter visualization | ✅ | 20-bar LED-style (green/yellow/red) per peer |
-| Local mic VU meter | ✅ | 20-bar blue LED-style for self-monitoring |
-| Settings panel (bitrate) | ✅ | Collapsible, 16-192 kbps slider |
-| Connection quality badge | ✅ | GOOD/FAIR/POOR indicator |
-| Mute toggle | ✅ | 🔊 LIVE / 🔇 MUTED |
-| Disconnect button | ✅ | ⏏ with Esc shortcut |
-| Keyboard shortcuts | ✅ | M=mute, Ctrl+Shift+D/Esc=disconnect |
-| Peer count display | ✅ | Real-time peer count |
-| Tauri commands integration | ✅ | join, leave, set_volume, set_opus_bitrate, set_muted |
-| ESLint + TypeScript strict | ✅ | Configured |
-| Frontend tests | ✅ | Vitest + 3 rendering tests |
-
----
-
-## Keyboard Shortcuts
+### Keyboard Shortcuts
 
 | Key | Action |
 |---|---|
 | `M` | Toggle mute/unmute |
-| `Ctrl+Shift+D` | Disconnect from room |
 | `Esc` | Disconnect from room |
+| `Ctrl+Shift+D` | Disconnect (alternative) |
 
 ---
 
-## Notes
+## Testing
 
-- The Node.js signaling server is **only** for signaling message exchange (Join/Leave/Offer/Answer/ICE). Audio flows directly P2P via WebRTC.
-- TURN server (openrelay.metered.ca) is pre-configured for NAT traversal.
-- Topology: **full mesh** — suitable for 2-6 peers. For larger sessions, an SFU would be needed.
-- The React UI in the browser (`npm run dev`) shows only the interface — audio/WebRTC functionality requires the Tauri desktop build.
+**Frontend:**
+```bash
+cd jam-gui && npm test
+```
 
-See [ROADMAP.md](./ROADMAP.md) for the complete list of remaining items and priorities.
+**Rust unit tests** (requires system dependencies):
+```bash
+cd jam-gui/src-tauri && cargo test
+```
+
+### Test Coverage
+
+- **Rust**: 18 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN safety, clipping, extreme values, convergence)
+- **Frontend**: 5 rendering tests (logo, connection form, inputs, component structure)
+- **Signaling**: Integration test scripts in `docs/testing/scripts/`
 
 ---
 
-**Last updated**: 2026-05-05
+## Performance
+
+### Latency Budget
+
+| Stage | Latency |
+|---|---|
+| Audio capture buffer | 10–20 ms |
+| Opus encoding | 20 ms |
+| Network RTT | 20–100 ms |
+| Opus decoding | < 1 ms |
+| Mixer/output buffer | 10–20 ms |
+| **Total** | **~60–160 ms** |
+
+### Mesh Scalability
+
+| Peers | Connections | Bandwidth |
+|---|---|---|
+| 2 | 1 | Low |
+| 3 | 3 | Moderate |
+| 5 | 10 | High |
+| N | N×(N-1)/2 | O(N²) |
+
+Full mesh is practical for 2–6 peers. For larger sessions, an SFU (Selective Forwarding Unit) would be needed.
+
+---
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining issues.
+
+**Completed:** Signaling server, Rust backend, WebRTC mesh, UI, CI/CD, graceful shutdown, message validation, VU throttling, component refactoring.
+
+**Next:** E2E audio verification, own TURN server (coturn), WSS signaling, room authentication, SFU topology.
+
+---
+
+## License
+
+ISC
+
+---
+
+**Last updated**: 2026-06-16

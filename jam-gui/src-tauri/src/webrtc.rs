@@ -152,10 +152,11 @@ impl PeerManager {
         Ok(())
     }
 
-    pub async fn close_all(&mut self, _handle: &tauri::AppHandle) {
+    pub async fn close_all(&mut self, handle: &tauri::AppHandle) {
         for (pid, pc) in self.peers.drain() {
             tracing::info!("Closing peer connection: {}", pid);
             let _ = pc.close();
+            let _ = handle.emit("peer-left", pid);
         }
     }
 
@@ -220,15 +221,19 @@ impl PeerManager {
                 };
                 let mut pcm = vec![0f32; samples_per_frame * 2];
                 let mut prev_level: f32 = 0.0f32;
+                let mut last_emit = std::time::Instant::now();
                 while let Ok((rtp, _)) = track.read_rtp().await {
                     if let Ok(len) = dec.decode_float(&rtp.payload, &mut pcm, false) {
                         let samples = &pcm[..len];
                         let _ = prod.push_slice(samples);
                         prev_level = compute_audio_level(samples, prev_level);
-                        let _ = h_emit.emit(
-                            "peer-level",
-                            serde_json::json!({ "id": p_inner, "level": prev_level }),
-                        );
+                        if last_emit.elapsed().as_millis() >= crate::config::VU_THROTTLE_MS {
+                            let _ = h_emit.emit(
+                                "peer-level",
+                                serde_json::json!({ "id": p_inner, "level": prev_level }),
+                            );
+                            last_emit = std::time::Instant::now();
+                        }
                     }
                 }
                 tracing::info!("Track from peer {} ended", p_inner);
@@ -245,15 +250,21 @@ impl PeerManager {
             let p = p_ice.clone();
             Box::pin(async move {
                 if let Some(c) = c {
-                    if let Ok(j) = c.to_json() {
-                        if let Ok(candidate) = serde_json::to_string(&j) {
-                            let _ = tx.send(SignalMessage::Ice {
-                                target: p,
-                                candidate,
-                                from: None,
-                            });
-                        } else {
-                            tracing::warn!("Failed to serialize ICE candidate for peer {}", p);
+                    match c.to_json() {
+                        Ok(j) => match serde_json::to_string(&j) {
+                            Ok(candidate) => {
+                                let _ = tx.send(SignalMessage::Ice {
+                                    target: p,
+                                    candidate,
+                                    from: None,
+                                });
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to serialize ICE candidate for peer {}: {:?}", p, e);
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!("Failed to convert ICE candidate to JSON for peer {}: {:?}", p, e);
                         }
                     }
                 }

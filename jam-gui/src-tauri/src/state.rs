@@ -50,7 +50,7 @@ pub async fn join_room(
     }
     res_rx
         .await
-        .map_err(|_| "Errore interno del backend".to_string())?
+        .map_err(|_| "Internal backend error".to_string())?
 }
 
 #[tauri::command]
@@ -66,7 +66,7 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
     }
     let result = res_rx
         .await
-        .map_err(|_| "Errore interno del backend".to_string())?;
+        .map_err(|_| "Internal backend error".to_string())?;
     state.connected.store(false, Ordering::SeqCst);
     result
 }

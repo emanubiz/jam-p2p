@@ -124,8 +124,10 @@ body {
   backdrop-filter: blur(20px);
   padding: 32px;
   position: relative;
+  animation: fadeIn 0.3s ease-out;
 }
 
+/* Status Bar */
 .status-bar {
   position: absolute;
   top: 0;
@@ -154,6 +156,7 @@ body {
 /* Connection Form */
 .connection-form {
   margin-bottom: 32px;
+  animation: slideUp 0.3s ease-out;
 }
 
 .input-group {
@@ -311,6 +314,7 @@ body {
 .mixer-section {
   border-top: 1px solid rgba(63, 63, 70, 0.5);
   padding-top: 32px;
+  animation: fadeIn 0.3s ease-out;
 }
 
 .mixer-header {
@@ -402,6 +406,10 @@ body {
   opacity: 0.3;
 }
 
+.empty-icon.waiting-pulse {
+  animation: waitingPulse 2s ease-in-out infinite;
+}
+
 .empty-text {
   font-size: 13px;
   color: #71717a;
@@ -430,20 +438,15 @@ body {
 }
 
 /* Local mic highlight */
-.peer-card.local {
-  border-color: rgba(59, 130, 246, 0.6);
-  background: linear-gradient(180deg, rgba(2,6,23,0.85), rgba(9,9,11,0.8));
-  box-shadow: 0 6px 20px rgba(59,130,246,0.06);
+.local-mic-card {
+  background: rgba(2, 6, 23, 0.7);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  padding: 16px;
+  margin-bottom: 16px;
 }
+
 .peer-avatar.local {
   background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
-}
-.peer-name {
-  display: flex;
-  align-items: center;
-}
-.peer-name::after {
-  content: '';
 }
 
 .peer-header {
@@ -590,13 +593,6 @@ body {
 }
 
 /* Local Level Meter */
-.local-mic-card {
-  background: rgba(2, 6, 23, 0.7);
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
 .local-level-meter {
   display: flex;
   gap: 2px;
@@ -655,6 +651,26 @@ body {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+@keyframes progressBar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes waitingPulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.1); }
 }
 
 /* ============================================
@@ -850,37 +866,4 @@ body {
   font-family: 'SF Mono', Monaco, Consolas, monospace;
   min-width: 24px;
   text-align: center;
-}
-
-/* ============================================
-   Animations
-   ============================================ */
-@keyframes gridMove {
-  0% { transform: translateY(0); }
-  100% { transform: translateY(50px); }
-}
-
-@keyframes float {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(30px, 30px); }
-}
-
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-
-@keyframes progressBar {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
 }

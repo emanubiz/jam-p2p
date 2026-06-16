@@ -17,11 +17,12 @@ use tokio::sync::mpsc;
 use ::webrtc::api::media_engine::MediaEngine;
 use ::webrtc::api::APIBuilder;
 
-use crate::audio::{init_audio, start_encoder_thread};
+use crate::audio::{init_audio, start_encoder_thread, EncoderHandle};
 use crate::config::default_ice_servers;
 use crate::logger::init_tracing;
 use crate::messages::{AppCommand, SignalMessage, WsEvent};
 use crate::signaling::SignalingClient;
+use tokio::sync::watch;
 use crate::state::init_state;
 use crate::webrtc::{PeerManager, WebrtcContext};
 
@@ -29,6 +30,7 @@ fn main() {
     init_tracing();
     let (tx, rx) = mpsc::unbounded_channel::<AppCommand>();
     let (app_state, backend_state) = init_state(tx);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     tauri::Builder::default()
         .manage(app_state)
@@ -39,13 +41,13 @@ fn main() {
             state::set_opus_bitrate,
             state::set_muted,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new()
                     .expect("failed to create tokio runtime");
                 rt.block_on(async move {
-                    if let Err(e) = run_backend(handle, backend_state, rx).await {
+                    if let Err(e) = run_backend(handle, backend_state, rx, shutdown_rx).await {
                         tracing::error!("Backend error: {:?}", e);
                     }
                 });
@@ -54,9 +56,11 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+    // Signal shutdown when Tauri exits
+    let _ = shutdown_tx.send(true);
 }
 
-async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut rx: mpsc::UnboundedReceiver<AppCommand>) -> Result<()> {
+async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut rx: mpsc::UnboundedReceiver<AppCommand>, mut shutdown_rx: watch::Receiver<bool>) -> Result<()> {
     let audio = init_audio()?;
     let mixer_sources = audio.mixer_sources.clone();
 
@@ -80,7 +84,7 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
     let saved_volumes: Arc<StdMutex<Vec<(String, f32)>>> =
         Arc::new(StdMutex::new(Vec::new()));
 
-    let _encoder_handle = start_encoder_thread(
+    let encoder_handle = start_encoder_thread(
         local_track.clone(),
         audio.mic_consumer,
         mixer_sources.clone(),
@@ -106,11 +110,21 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
     };
 
     let mut peer_manager = PeerManager::new();
-    let mut sig_client = SignalingClient::new(ws_in_tx, sig_tx.clone(), ws_event_tx);
+    let mut sig_client = SignalingClient::new(ws_in_tx, sig_tx.clone(), ws_event_tx, shutdown_rx.clone());
     let mut my_id: Option<String> = None;
 
     loop {
         tokio::select! {
+            _ = shutdown_rx.changed() => {
+                tracing::info!("Backend shutting down gracefully");
+                sig_client.leave().await;
+                peer_manager.close_all(&handle).await;
+                encoder_handle.shutdown();
+                if let Ok(mut sources) = mixer_sources.lock() {
+                    sources.clear();
+                }
+                break;
+            }
             Some(cmd) = rx.recv() => {
                 match cmd {
                     AppCommand::Join { server, room, name, res_tx } => {

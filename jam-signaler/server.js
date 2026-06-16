@@ -7,6 +7,8 @@ const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB max per message
 const MESSAGE_RATE_LIMIT = 50; // messages per second per connection
+const HTTP_RATE_LIMIT = 100; // requests per second per IP
+const MAX_ROOM_NAME_LENGTH = 64;
 
 // ICE server configuration (STUN/TURN)
 const ICE_SERVERS = [
@@ -22,14 +24,92 @@ const ICE_SERVERS = [
 const rooms = new Map(); // roomName -> Map(uuid -> ws)
 const peers = new Map(); // ws -> { uuid, room }
 
-// HTTP endpoint for room info and ICE config
+// --- Rate limiting state ---
+const httpRateMap = new Map(); // ip -> { count, windowStart }
+
+function checkHttpRateLimit(ip) {
+  const now = Date.now();
+  let entry = httpRateMap.get(ip);
+  if (!entry || now - entry.windowStart > 1000) {
+    entry = { count: 0, windowStart: now };
+    httpRateMap.set(ip, entry);
+  }
+  entry.count++;
+  return entry.count <= HTTP_RATE_LIMIT;
+}
+
+// Periodic cleanup of stale HTTP rate entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of httpRateMap) {
+    if (now - entry.windowStart > 5000) httpRateMap.delete(ip);
+  }
+}, 10000);
+
+// --- Message validation ---
+const VALID_MESSAGE_TYPES = new Set(['Join', 'Leave', 'Offer', 'Answer', 'Ice']);
+
+function validateMessage(message) {
+  if (!message || typeof message !== 'object') return false;
+  if (!VALID_MESSAGE_TYPES.has(message.type)) return false;
+
+  switch (message.type) {
+    case 'Join':
+      return (
+        message.data &&
+        typeof message.data.room === 'string' &&
+        message.data.room.trim().length > 0 &&
+        message.data.room.length <= MAX_ROOM_NAME_LENGTH
+      );
+    case 'Leave':
+      return true;
+    case 'Offer':
+    case 'Answer':
+      return (
+        message.data &&
+        typeof message.data.target === 'string' &&
+        typeof message.data.sdp === 'string'
+      );
+    case 'Ice':
+      return (
+        message.data &&
+        typeof message.data.target === 'string' &&
+        typeof message.data.candidate === 'string'
+      );
+    default:
+      return false;
+  }
+}
+
+// --- Peer cleanup helper ---
+function removePeerFromRoom(ws, uuid, room) {
+  if (!room || !rooms.has(room)) return;
+  const roomPeers = rooms.get(room);
+  roomPeers.delete(uuid);
+  roomPeers.forEach((peerWs) => {
+    if (peerWs.readyState === WebSocket.OPEN) {
+      peerWs.send(JSON.stringify({ type: 'PeerLeft', data: { uuid } }));
+    }
+  });
+  if (roomPeers.size === 0) rooms.delete(room);
+  logger.info({ uuid, room }, 'Peer removed from room');
+}
+
+// --- HTTP server ---
 const httpServer = http.createServer((req, res) => {
+  const clientIp = req.socket.remoteAddress || 'unknown';
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  if (!checkHttpRateLimit(clientIp)) {
+    res.writeHead(429);
+    res.end(JSON.stringify({ error: 'Rate limit exceeded' }));
     return;
   }
 
@@ -93,10 +173,8 @@ function startHeartbeat() {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
         const peer = peers.get(ws);
-        if (peer && peer.room && rooms.has(peer.room)) {
-          rooms.get(peer.room).delete(peer.uuid);
-          if (rooms.get(peer.room).size === 0) rooms.delete(peer.room);
-          logger.info({ uuid: peer.uuid, room: peer.room }, 'Dead peer cleaned up');
+        if (peer) {
+          removePeerFromRoom(ws, peer.uuid, peer.room);
         }
         peers.delete(ws);
         return ws.terminate();
@@ -116,19 +194,15 @@ httpServer.listen(PORT, () => {
 // Graceful shutdown handlers
 function gracefulShutdown(signal) {
   logger.info({ signal }, 'Shutdown requested, closing connections...');
-  // Close all WebSocket connections with close code 1001 (going away)
   wss.clients.forEach(ws => {
     ws.close(1001, 'Server shutting down');
   });
-  // Clear peer tracking maps
   rooms.clear();
   peers.clear();
-  // Close HTTP server
   httpServer.close(() => {
     logger.info('HTTP server closed gracefully');
     process.exit(0);
   });
-  // Force kill if shutdown takes too long
   setTimeout(() => {
     logger.error('Forced shutdown after timeout');
     process.exit(1);
@@ -138,6 +212,7 @@ function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
+// --- WebSocket connection handler ---
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   let currentRoom = null;
@@ -177,13 +252,14 @@ wss.on('connection', (ws, req) => {
     let message;
     try { message = JSON.parse(raw); } catch (err) { return; }
 
+    if (!validateMessage(message)) {
+      logger.warn({ uuid: userUuid, type: message?.type }, 'Invalid message');
+      return;
+    }
+
     switch (message.type) {
       case 'Join': {
         const { room } = message.data;
-        if (!room || typeof room !== 'string' || room.trim().length === 0) {
-          logger.warn({ uuid: userUuid }, 'Invalid room name in Join');
-          return;
-        }
         currentRoom = room;
         if (!rooms.has(room)) rooms.set(room, new Map());
         const roomPeers = rooms.get(room);
@@ -222,16 +298,7 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'Leave': {
-        if (currentRoom && rooms.has(currentRoom)) {
-          rooms.get(currentRoom).delete(userUuid);
-          rooms.get(currentRoom).forEach((peerWs) => {
-            if (peerWs.readyState === WebSocket.OPEN) {
-              peerWs.send(JSON.stringify({ type: 'PeerLeft', data: { uuid: userUuid } }));
-            }
-          });
-          if (rooms.get(currentRoom).size === 0) rooms.delete(currentRoom);
-          logger.info({ uuid: userUuid, room: currentRoom }, 'Peer left via Leave');
-        }
+        removePeerFromRoom(ws, userUuid, currentRoom);
         currentRoom = null;
         break;
       }
@@ -239,16 +306,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    if (currentRoom && rooms.has(currentRoom)) {
-      rooms.get(currentRoom).delete(userUuid);
-      rooms.get(currentRoom).forEach((peerWs) => {
-        if (peerWs.readyState === WebSocket.OPEN) {
-          peerWs.send(JSON.stringify({ type: 'PeerLeft', data: { uuid: userUuid } }));
-        }
-      });
-      if (rooms.get(currentRoom).size === 0) rooms.delete(currentRoom);
-      logger.info({ uuid: userUuid, room: currentRoom }, 'Peer disconnected');
-    }
+    removePeerFromRoom(ws, userUuid, currentRoom);
     peers.delete(ws);
   });
 

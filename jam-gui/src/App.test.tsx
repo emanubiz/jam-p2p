@@ -33,4 +33,16 @@ describe("App", () => {
     expect(screen.getByDisplayValue("ws://localhost:8080")).toBeTruthy();
     expect(screen.getByDisplayValue("studio1")).toBeTruthy();
   });
+
+  it("renders ConnectionForm component", () => {
+    render(<App />);
+    expect(screen.getByText("Server Endpoint")).toBeTruthy();
+    expect(screen.getByText("Room ID")).toBeTruthy();
+  });
+
+  it("renders StatusBar component", () => {
+    render(<App />);
+    const statusText = screen.getByText("Ready");
+    expect(statusText).toBeTruthy();
+  });
 });

@@ -151,6 +151,8 @@ pub fn start_encoder_thread(
         let mut seq: u16 = 0;
         let mut timestamp: u32 = 0;
         let mut prev_level = 0.0f32;
+        let mut last_emit = std::time::Instant::now();
+        let mut cached_bitrate = DEFAULT_OPUS_BITRATE;
 
         loop {
             if *shutdown_rx.borrow() {
@@ -159,7 +161,10 @@ pub fn start_encoder_thread(
             }
 
             let br = opus_bitrate.load(Ordering::Relaxed);
+            if br != cached_bitrate {
                 let _ = encoder.set_bitrate(Bitrate::Bits(br));
+                cached_bitrate = br;
+            }
             while pcm_buf.len() < samples_per_frame {
                 if *shutdown_rx.borrow() {
                     return;
@@ -199,7 +204,10 @@ pub fn start_encoder_thread(
 
                 let level = compute_audio_level(&pcm_buf, prev_level);
                 prev_level = level;
-                let _ = handle.emit("local-level", serde_json::json!({"level": level}));
+                if last_emit.elapsed().as_millis() >= crate::config::VU_THROTTLE_MS {
+                    let _ = handle.emit("local-level", serde_json::json!({"level": level}));
+                    last_emit = std::time::Instant::now();
+                }
 
                 seq = seq.wrapping_add(1);
                 timestamp = timestamp.wrapping_add(samples_per_frame as u32);

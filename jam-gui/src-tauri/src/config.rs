@@ -8,6 +8,7 @@ pub const RING_BUFFER_SIZE_MULT: usize = 4;
 pub const RTP_PAYLOAD_TYPE: u8 = 111;
 pub const EMA_ALPHA: f32 = 0.3;
 pub const SILENCE_THRESHOLD_DBFS: f32 = -60.0;
+pub const VU_THROTTLE_MS: u128 = 67; // ~15Hz throttle for VU meter events
 
 pub const STUN_SERVER: &str = "stun:stun.l.google.com:19302";
 pub const TURN_SERVER: &str = "turn:openrelay.metered.ca:80";
