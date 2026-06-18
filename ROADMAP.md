@@ -11,9 +11,9 @@
 
 | Area | Status | Notes |
 |---|---|---|
-| Signaling server | ✅ Complete | WebSocket + HTTP API, heartbeat, STUN/TURN, Docker, rate limiting (WS + HTTP), message validation, graceful shutdown |
-| Rust backend | ✅ Complete | cpal audio (forced Opus sample rate), Opus codec, WebRTC single-offerer mesh, RT-safe mixer, fault-tolerant reconnect, mute/save-restore, graceful shutdown, VU throttle, bitrate clamp+dedup, 23 unit tests |
-| Frontend UI | ✅ Refactored | Component-based architecture (7 components + hook), volume controls, VU meters, settings panel, keyboard shortcuts, 5 rendering tests |
+| Signaling server | ✅ Complete | WebSocket + HTTP API, heartbeat, STUN/TURN, Docker, rate limiting (WS + HTTP), message validation, graceful shutdown, DoS caps (peers/room, rooms), CORS env, name propagation, Error envelope, re-join leak fix |
+| Rust backend | ✅ Complete | cpal audio (forced Opus sample rate), Opus codec, WebRTC single-offerer mesh, RT-safe mixer, fault-tolerant reconnect, mute/save-restore, graceful shutdown, VU throttle, bitrate clamp+dedup, ICE servers sourced from Welcome, 30 unit tests (23 audio + 7 serde wire protocol) |
+| Frontend UI | ✅ Refactored | Component-based architecture (8 components + shared `AppStatus` type + hook), volume controls, VU meters, settings panel, keyboard shortcuts, display name input, auto-reconnect with Cancel, server-error surfacing, 6 rendering tests |
 | Mesh signaling tests | ✅ Verified | 3-peer (6 conns), 5-peer (20 conns) |
 | CI/CD pipeline | ✅ Configured | Linux, macOS (Intel + ARM), Windows builds, GitHub Release on tag |
 | ADR documentation | ✅ Written | ADR-001: WsEvent reconnect mechanism |
@@ -132,15 +132,24 @@
 - [ ] SFU topology option for >6 peers
 - [ ] Benchmark suite (latency, CPU, memory)
 
-### Phase 9.1: Remaining Audit Items (from 2026-06-18 review)
-> Identified during the critical-fix audit but **not yet fixed** — tracked here.
-- [ ] **Security**: `GET /room/:name` + `Access-Control-Allow-Origin: *` let any website enumerate room peer UUIDs → restrict CORS and/or gate room info behind auth
-- [ ] **Security**: signaling has no authentication — anyone can join any room (eavesdrop/inject); pairs with WSS + room passwords above
-- [ ] **Reliability**: `backend.connected` is never reset to `false` on WS drop → after a failed reconnect the UI is stuck "disconnected" and manual rejoin is rejected with "Already connected"
-- [ ] **Signaling**: re-`Join` without `Leave` leaks the previous room membership (ghost peer until heartbeat) — remove peer from its old room on a new Join
-- [ ] **DoS**: no cap on peers-per-room or total rooms → unbounded memory; add limits
-- [ ] **Cleanup**: server-provided `iceServers` (in `Welcome`) are ignored by the Rust client, which hardcodes them in `config.rs` — wire one source of truth
-- [ ] **Cleanup**: `name` is plumbed through `Join` but the server ignores it and the UI hardcodes `"user"` — add a name input or drop the field
+### ✅ Phase 7.6: Audit Phase 2 — Completed (2026-06-18)
+> All remaining audit items from the 2026-06-18 review are now fixed.
+- [x] **Signal DoS caps**: `MAX_PEERS_PER_ROOM=8`, `MAX_ROOMS=500`, `MAX_NAME_LENGTH=32` — all env-configurable (`MAX_PEERS_PER_ROOM`, `MAX_ROOMS`)
+- [x] **CORS lockdown**: `ALLOWED_ORIGIN` env var replaces the hardcoded `*` (defaults to `*` for local dev)
+- [x] **Peer info leak closed**: `GET /room/:name` now returns only an aggregate `peerCount`; per-peer UUIDs are no longer enumerable cross-origin
+- [x] **ICE single source of truth**: server's `Welcome.iceServers` overrides the Rust config defaults when present
+- [x] **Server ICE urls are arrays**: always emitted as `urls: []` matching `webrtc-rs::RTCIceServer`
+- [x] **Display name end-to-end**: ConnectionForm has a `Display Name` input (max 32 chars); `Join` sends `name.trim() || "Anonymous"`; server stores `displayName` and propagates it through `PeerList` (`[{uuid,name}]`) and `NewPeer` (`{uuid,name}`); UI labels each peer by name and falls back to `Musician <4-char-uuid>` when empty
+- [x] **Re-Join leak fixed**: server calls `removePeerFromRoom` on a room change during Join, eliminating ghost peers after a swap
+- [x] **`backend.connected` reset on disconnect**: `WsEvent::Disconnected` flips `backend.connected = false`, so manual rejoin after a permanently failed reconnect is accepted (was rejected with "Already connected")
+- [x] **Idempotent `leave_room`**: removed the `!connected` guard so Cancel during auto-reconnect always succeeds; the flag is force-cleared even on backend error
+- [x] **Reconnecting UI**: `StatusBar` has a `reconnecting` state; App.tsx renders a panel with spinner, `Reconnecting to <room>…`, and a Cancel button
+- [x] **Server Error envelope**: new `Error { message }` variant flows from server (room full/limit reached) → `webrtc.rs` → `server-error` Tauri event → UI `error` state
+- [x] **CI compile fixes**: `main.rs` loop returns `Result<()>`; `audio.rs` imports `TrackLocalWriter` so macOS/Windows/Linux build matrix can compile
+- [x] **Tests**: 7 new Rust serde round-trip tests for the wire protocol; `App.test.tsx` adds Display Name label + `fireEvent.change` test
+- [x] **Code quality**: shared `AppStatus` union across `App.tsx`/`ConnectionForm.tsx`; `PeerManager.names` cleaned on `PeerLeft`
+
+> **Deferred to a future round** (still in Phase 9): signaling WSS, room authentication, own TURN server. These are deployment concerns, not block-level correctness.
 
 ## Next Actions
 

@@ -14,6 +14,7 @@ use tokio::sync::watch;
 use crate::config::{DEFAULT_OPUS_BITRATE, FRAME_SIZE_MS, RING_BUFFER_SIZE_MULT, RTP_PAYLOAD_TYPE};
 use opus::{Application, Bitrate, Channels, Encoder};
 use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use ::webrtc::track::track_local::TrackLocalWriter;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use tauri::{AppHandle, Emitter};
 

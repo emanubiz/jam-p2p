@@ -99,7 +99,6 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
 
     let ctx = WebrtcContext {
         api,
-        ice_servers,
         local_track,
         mixer: mixer_sources.clone(),
         sig_tx: sig_tx.clone(),
@@ -108,7 +107,7 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
         samples_per_frame: audio.samples_per_frame,
     };
 
-    let mut peer_manager = PeerManager::new();
+    let mut peer_manager = PeerManager::new(ice_servers);
     let mut sig_client = SignalingClient::new(ws_in_tx, sig_tx.clone(), ws_event_tx, shutdown_rx.clone());
     let mut my_id: Option<String> = None;
 
@@ -122,7 +121,9 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
                 if let Ok(mut sources) = mixer_sources.lock() {
                     sources.clear();
                 }
-                break;
+                // run_backend returns Result<()>; the select! arm must produce a
+                // matching type, so we break with Ok(()) rather than `()`.
+                break Ok(());
             }
             Some(cmd) = rx.recv() => {
                 match cmd {
@@ -180,9 +181,12 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
             }
             Some(text) = ws_in_rx.recv() => {
                 if let Ok(signal) = serde_json::from_str::<SignalMessage>(&text) {
-                    // Set connected flag when Welcome is received
+                    // Set connected flag when Welcome is received (covers both
+                    // the initial join and a successful auto-reconnect, so the
+                    // UI can return to the live view).
                     if matches!(signal, SignalMessage::Welcome { .. }) {
                         backend.connected.store(true, Ordering::SeqCst);
+                        let _ = handle.emit("connected", ());
                     }
                     if let Err(e) = peer_manager.handle_signal(
                         signal,
@@ -194,7 +198,14 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
                 }
             }
             Some(_) = ws_event_rx.recv() => {
-                // WS connection dropped — handle reconnect
+                // WS connection dropped — handle reconnect. Resetting
+                // `connected` here is critical: otherwise a permanently
+                // failed reconnect leaves the UI blocked on
+                // "Already connected" because join_room's guard never
+                // sees a false signal until the user explicitly leaves.
+                // The auto-reconnect path doesn't go through join_room,
+                // so this is safe; on Welcome it is flipped back to true.
+                backend.connected.store(false, Ordering::SeqCst);
                 let _ = handle.emit("disconnected", ());
                 peer_manager.close_all(&handle).await;
                 if sig_client.should_reconnect() {

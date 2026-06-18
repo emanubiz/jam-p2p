@@ -1,14 +1,14 @@
 import React from "react";
 
 interface StatusBarProps {
-  status: "idle" | "joining" | "connected" | "disconnected" | "error";
+  status: "idle" | "joining" | "connected" | "reconnecting" | "error";
 }
 
 const statusText: Record<string, string> = {
   idle: "Ready",
   joining: "Establishing Connection",
   connected: "Live Session",
-  disconnected: "Disconnected — tap Reconnect",
+  reconnecting: "Reconnecting to server…",
   error: "Connection Failed",
 };
 

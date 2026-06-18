@@ -10,9 +10,10 @@ import "./App.css";
 
 function App() {
   const [room, setRoom] = useState("studio1");
+  const [name, setName] = useState("");
   const [server, setServer] = useState("ws://localhost:8080");
   const [status, setStatus] = useState<
-    "idle" | "joining" | "connected" | "disconnected" | "error"
+    "idle" | "joining" | "connected" | "reconnecting" | "error"
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
@@ -24,28 +25,48 @@ function App() {
     localLevel,
     disconnected,
     clearDisconnected,
+    reconnected,
+    clearReconnected,
+    serverError,
+    clearServerError,
     resetPeers,
     updatePeerVolume,
   } = useTauriEvents();
 
   useEffect(() => {
     if (disconnected) {
-      setStatus("disconnected");
+      // Backend auto-reconnects with backoff; show a reconnecting state rather
+      // than a fresh form (which would conflict with the in-flight reconnect).
+      setStatus((s) => (s === "idle" ? s : "reconnecting"));
       clearDisconnected();
     }
   }, [disconnected, clearDisconnected]);
+
+  useEffect(() => {
+    if (reconnected) {
+      setStatus((s) => (s === "idle" ? s : "connected"));
+      clearReconnected();
+    }
+  }, [reconnected, clearReconnected]);
+
+  useEffect(() => {
+    if (serverError) {
+      setError(serverError);
+      clearServerError();
+    }
+  }, [serverError, clearServerError]);
 
   const connect = useCallback(async () => {
     setStatus("joining");
     setError(null);
     try {
-      await invoke("join_room", { room, name: "user", server });
+      await invoke("join_room", { room, name: name.trim() || "Anonymous", server });
       setStatus("connected");
     } catch (err: unknown) {
       setError(String(err));
       setStatus("error");
     }
-  }, [room, server]);
+  }, [room, name, server]);
 
   const disconnect = useCallback(async () => {
     try {
@@ -139,11 +160,29 @@ function App() {
             <ConnectionForm
               server={server}
               room={room}
+              name={name}
               status={status}
               onServerChange={setServer}
               onRoomChange={setRoom}
+              onNameChange={setName}
               onConnect={connect}
             />
+          )}
+
+          {status === "reconnecting" && (
+            <div className="reconnecting-panel">
+              <span className="spinner" />
+              <span className="reconnecting-text">
+                Reconnecting to <strong>{room}</strong>…
+              </span>
+              <button
+                className="cancel-btn"
+                onClick={disconnect}
+                title="Cancel auto-reconnect and return to the form"
+              >
+                Cancel
+              </button>
+            </div>
           )}
 
           <StatusBar status={status} />

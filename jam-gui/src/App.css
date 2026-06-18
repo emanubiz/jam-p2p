@@ -867,3 +867,73 @@ body {
   min-width: 24px;
   text-align: center;
 }
+
+/* ============================================
+   Reconnecting Panel (auto-reconnect in flight)
+   ============================================ */
+.reconnecting-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  margin-top: 8px;
+  margin-bottom: 24px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.reconnecting-panel .spinner {
+  width: 12px;
+  height: 12px;
+}
+
+.reconnecting-text {
+  font-size: 13px;
+  color: #c4b5fd;
+}
+
+.reconnecting-text strong {
+  color: #fafafa;
+  font-weight: 600;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cancel-btn {
+  padding: 6px 14px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.cancel-btn:hover {
+  border-color: rgba(239, 68, 68, 0.7);
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* Reconnecting status colors (mirrors the joining palette but stays in the
+   purple/pink family to suggest "still trying" rather than "failed"). */
+.status-bar.status-reconnecting {
+  background: linear-gradient(90deg, #8b5cf6, #ec4899);
+  animation: progressBar 2s ease-in-out infinite;
+}
+
+.status-dot.status-reconnecting {
+  background: #8b5cf6;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-text.status-reconnecting {
+  color: #a78bfa;
+}

@@ -1,31 +1,52 @@
 import React from "react";
 
+export type AppStatus =
+  | "idle"
+  | "joining"
+  | "connected"
+  | "reconnecting"
+  | "error";
+
 interface ConnectionFormProps {
   server: string;
   room: string;
-  status: string;
+  name: string;
+  status: AppStatus;
   onServerChange: (value: string) => void;
   onRoomChange: (value: string) => void;
+  onNameChange: (value: string) => void;
   onConnect: () => void;
 }
 
 const ConnectionForm = React.memo(function ConnectionForm({
   server,
   room,
+  name,
   status,
   onServerChange,
   onRoomChange,
+  onNameChange,
   onConnect,
 }: ConnectionFormProps) {
   const buttonLabel =
-    status === "joining"
-      ? "Connecting"
-      : status === "disconnected"
-      ? "Reconnect"
-      : "Connect to Session";
+    status === "joining" ? "Connecting" : "Connect to Session";
 
   return (
     <div className="connection-form">
+      <div className="input-group">
+        <label className="input-label">Display Name</label>
+        <input
+          className="input-field"
+          value={name}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder="Anonymous"
+          maxLength={32}
+          disabled={status === "joining"}
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
+
       <div className="input-group">
         <label className="input-label">Server Endpoint</label>
         <input

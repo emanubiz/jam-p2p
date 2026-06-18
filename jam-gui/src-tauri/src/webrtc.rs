@@ -17,7 +17,6 @@ use crate::messages::SignalMessage;
 
 pub struct WebrtcContext {
     pub api: Arc<::webrtc::api::API>,
-    pub ice_servers: Vec<RTCIceServer>,
     pub local_track: Arc<TrackLocalStaticRTP>,
     pub mixer: Arc<Mutex<MixerMap>>,
     pub sig_tx: mpsc::UnboundedSender<SignalMessage>,
@@ -28,12 +27,18 @@ pub struct WebrtcContext {
 
 pub struct PeerManager {
     peers: HashMap<String, Arc<RTCPeerConnection>>,
+    /// uuid -> display name, learned from PeerList / NewPeer.
+    names: HashMap<String, String>,
+    /// ICE servers; seeded from config, overridden by the server's Welcome.
+    ice_servers: Vec<RTCIceServer>,
 }
 
 impl PeerManager {
-    pub fn new() -> Self {
+    pub fn new(ice_servers: Vec<RTCIceServer>) -> Self {
         PeerManager {
             peers: HashMap::new(),
+            names: HashMap::new(),
+            ice_servers,
         }
     }
 
@@ -44,18 +49,33 @@ impl PeerManager {
         ctx: &WebrtcContext,
     ) -> Result<()> {
         match signal {
-            SignalMessage::Welcome { uuid } => {
+            SignalMessage::Welcome { uuid, ice_servers } => {
                 *my_id = Some(uuid);
+                // Prefer the server-advertised ICE servers (single source of
+                // truth); fall back to the config defaults already loaded.
+                if !ice_servers.is_empty() {
+                    self.ice_servers = ice_servers
+                        .iter()
+                        .map(|s| RTCIceServer {
+                            urls: s.urls.clone(),
+                            username: s.username.clone(),
+                            credential: s.credential.clone(),
+                            ..Default::default()
+                        })
+                        .collect();
+                }
             }
             SignalMessage::Join { .. } => {}
             SignalMessage::PeerList {
                 peers: remote_peers,
             } => {
-                for pid in remote_peers {
+                for peer in remote_peers {
+                    let pid = peer.uuid;
                     if self.peers.contains_key(&pid) {
                         continue;
                     }
-                    let pc = match self.create_peer_connection(pid.clone(), ctx).await {
+                    self.names.insert(pid.clone(), peer.name.clone());
+                    let pc = match self.create_peer_connection(pid.clone(), peer.name.clone(), ctx).await {
                         Ok(pc) => pc,
                         Err(e) => {
                             tracing::error!("Failed to create peer connection for {}: {:?}", pid, e);
@@ -88,12 +108,18 @@ impl PeerManager {
                     self.peers.insert(pid, pc);
                 }
             }
-            SignalMessage::NewPeer { .. } => {
+            SignalMessage::NewPeer { uuid: pid, name } => {
                 // The newcomer received us in its PeerList and will send the
                 // offer; we answer in the Offer handler. Offering here too would
                 // make both sides offer simultaneously (glare) — each then hits
                 // the `contains_key` guard below and drops the other's offer, so
-                // no answer is ever produced and negotiation stalls.
+                // no answer is ever produced and negotiation stalls. We only
+                // remember the name so we can label the peer when it connects.
+                self.names.insert(pid, name);
+            }
+            SignalMessage::Error { message } => {
+                tracing::warn!("Signaling server error: {}", message);
+                let _ = ctx.handle.emit("server-error", message);
             }
             SignalMessage::PeerLeft { uuid: pid } => {
                 if let Some(pc) = self.peers.remove(&pid) {
@@ -106,7 +132,8 @@ impl PeerManager {
                     if self.peers.contains_key(&pid) {
                         return Ok(());
                     }
-                    let pc = self.create_peer_connection(pid.clone(), ctx).await?;
+                    let name = self.names.get(&pid).cloned().unwrap_or_default();
+                    let pc = self.create_peer_connection(pid.clone(), name, ctx).await?;
                     pc.set_remote_description(serde_json::from_str(&sdp)?)
                         .await?;
                     let answer = pc.create_answer(None).await?;
@@ -155,10 +182,11 @@ impl PeerManager {
     async fn create_peer_connection(
         &self,
         pid: String,
+        name: String,
         ctx: &WebrtcContext,
     ) -> Result<Arc<RTCPeerConnection>> {
         let config = RTCConfiguration {
-            ice_servers: ctx.ice_servers.clone(),
+            ice_servers: self.ice_servers.clone(),
             ..Default::default()
         };
         let pc = ctx.api.new_peer_connection(config).await?;
@@ -167,14 +195,19 @@ impl PeerManager {
 
         let h_state_pc = ctx.handle.clone();
         let p_state = pid.clone();
+        let name_state = name;
         pc.on_peer_connection_state_change(Box::new(move |s| {
             let h_emit = h_state_pc.clone();
             let p_clone = p_state.clone();
+            let name_clone = name_state.clone();
             Box::pin(async move {
                 match s {
                     ::webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected => {
                         tracing::info!("Peer {} connected", p_clone);
-                        let _ = h_emit.emit("peer-joined", p_clone.clone());
+                        let _ = h_emit.emit(
+                            "peer-joined",
+                            serde_json::json!({ "id": p_clone, "name": name_clone }),
+                        );
                     }
                     ::webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected => {
                         tracing::info!("Peer {} disconnected", p_clone);

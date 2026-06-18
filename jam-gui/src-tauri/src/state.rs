@@ -55,9 +55,11 @@ pub async fn join_room(
 
 #[tauri::command]
 pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
-    if !state.connected.load(Ordering::SeqCst) {
-        return Err("Not connected to any room.".to_string());
-    }
+    // Leave is idempotent. The user may click Cancel during an in-flight
+    // auto-reconnect (where `connected` is already false); guard-clicking
+    // them with "Not connected" would block the only path that stops the
+    // reconnect loop. The backend resets last_join unconditionally and the
+    // connected flag flip is a no-op when already false.
     let (res_tx, res_rx) = tokio::sync::oneshot::channel();
     {
         let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -67,6 +69,9 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
     let result = res_rx
         .await
         .map_err(|_| "Internal backend error".to_string())?;
+    // Force-clear the connected flag even when the backend Leave failed:
+    // the user's intent was to disconnect, so we don't want the
+    // `join_room` guard to refuse their next reconnect attempt.
     state.connected.store(false, Ordering::SeqCst);
     result
 }

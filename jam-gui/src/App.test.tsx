@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import App from "./App";
 
 // Mock Tauri invoke and listen APIs
@@ -38,11 +38,20 @@ describe("App", () => {
     render(<App />);
     expect(screen.getByText("Server Endpoint")).toBeTruthy();
     expect(screen.getByText("Room ID")).toBeTruthy();
+    expect(screen.getByText("Display Name")).toBeTruthy();
   });
 
   it("renders StatusBar component", () => {
     render(<App />);
     const statusText = screen.getByText("Ready");
     expect(statusText).toBeTruthy();
+  });
+
+  it("accepts a display name in the form", () => {
+    render(<App />);
+    const nameInput = screen.getByPlaceholderText("Anonymous") as HTMLInputElement;
+    expect(nameInput).toBeTruthy();
+    fireEvent.change(nameInput, { target: { value: "Alice" } });
+    expect(nameInput.value).toBe("Alice");
   });
 });

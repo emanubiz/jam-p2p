@@ -9,13 +9,22 @@ const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB max per message
 const MESSAGE_RATE_LIMIT = 50; // messages per second per connection
 const HTTP_RATE_LIMIT = 100; // requests per second per IP
 const MAX_ROOM_NAME_LENGTH = 64;
+const MAX_NAME_LENGTH = 32;
+// DoS guards: bound memory and keep the full-mesh topology sane.
+const MAX_PEERS_PER_ROOM = process.env.MAX_PEERS_PER_ROOM
+  ? parseInt(process.env.MAX_PEERS_PER_ROOM, 10)
+  : 8;
+const MAX_ROOMS = process.env.MAX_ROOMS ? parseInt(process.env.MAX_ROOMS, 10) : 500;
+// CORS: lock down in production via ALLOWED_ORIGIN; defaults to '*' for local dev.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 
-// ICE server configuration (STUN/TURN)
+// ICE server configuration (STUN/TURN). `urls` is always an array so the
+// Rust client can deserialize it directly into webrtc-rs RTCIceServer.
 const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: ['stun:stun.l.google.com:19302'] },
+  { urls: ['stun:stun1.l.google.com:19302'] },
   {
-    urls: 'turn:openrelay.metered.ca:80',
+    urls: ['turn:openrelay.metered.ca:80'],
     username: 'openrelayproject',
     credential: 'openrelay'
   },
@@ -59,7 +68,11 @@ function validateMessage(message) {
         message.data &&
         typeof message.data.room === 'string' &&
         message.data.room.trim().length > 0 &&
-        message.data.room.length <= MAX_ROOM_NAME_LENGTH
+        message.data.room.length <= MAX_ROOM_NAME_LENGTH &&
+        // name is optional; if present it must be a bounded string
+        (message.data.name === undefined ||
+          (typeof message.data.name === 'string' &&
+            message.data.name.length <= MAX_NAME_LENGTH))
       );
     case 'Leave':
       return true;
@@ -98,7 +111,7 @@ function removePeerFromRoom(ws, uuid, room) {
 // --- HTTP server ---
 const httpServer = http.createServer((req, res) => {
   const clientIp = req.socket.remoteAddress || 'unknown';
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'OPTIONS') {
@@ -126,10 +139,11 @@ const httpServer = http.createServer((req, res) => {
     const room = rooms.get(roomName);
     if (room) {
       res.writeHead(200);
+      // Only expose an aggregate count — never the peer UUID list, which would
+      // let any origin enumerate participants and target signaling at them.
       res.end(JSON.stringify({
         room: roomName,
-        peerCount: room.size,
-        peers: Array.from(room.keys())
+        peerCount: room.size
       }));
     } else {
       res.writeHead(404);
@@ -260,22 +274,48 @@ wss.on('connection', (ws, req) => {
     switch (message.type) {
       case 'Join': {
         const { room } = message.data;
-        currentRoom = room;
+        const name = typeof message.data.name === 'string' ? message.data.name : '';
+
+        // Re-Join without an explicit Leave: drop the previous room membership
+        // first, otherwise the old room keeps a ghost entry for this socket.
+        if (currentRoom && currentRoom !== room) {
+          removePeerFromRoom(ws, userUuid, currentRoom);
+        }
+
+        // Room-count cap (only relevant when creating a brand-new room).
+        if (!rooms.has(room) && rooms.size >= MAX_ROOMS) {
+          logger.warn({ room, rooms: rooms.size }, 'Room limit reached');
+          ws.send(JSON.stringify({ type: 'Error', data: { message: 'Server room limit reached' } }));
+          break;
+        }
         if (!rooms.has(room)) rooms.set(room, new Map());
         const roomPeers = rooms.get(room);
 
-        const peerList = Array.from(roomPeers.keys());
+        // Per-room peer cap (a re-Join for the same room is already a member).
+        if (!roomPeers.has(userUuid) && roomPeers.size >= MAX_PEERS_PER_ROOM) {
+          logger.warn({ room, peerCount: roomPeers.size }, 'Room is full');
+          ws.send(JSON.stringify({ type: 'Error', data: { message: 'Room is full' } }));
+          break;
+        }
+
+        currentRoom = room;
+        ws.displayName = name;
+
+        const peerList = Array.from(roomPeers, ([uuid, peerWs]) => ({
+          uuid,
+          name: peerWs.displayName || ''
+        }));
         ws.send(JSON.stringify({ type: 'PeerList', data: { peers: peerList } }));
 
         roomPeers.forEach((peerWs) => {
           if (peerWs.readyState === WebSocket.OPEN) {
-            peerWs.send(JSON.stringify({ type: 'NewPeer', data: { uuid: userUuid } }));
+            peerWs.send(JSON.stringify({ type: 'NewPeer', data: { uuid: userUuid, name } }));
           }
         });
 
         roomPeers.set(userUuid, ws);
         peers.set(ws, { uuid: userUuid, room });
-        logger.info({ room, uuid: userUuid, peerCount: roomPeers.size }, 'Peer joined');
+        logger.info({ room, uuid: userUuid, name, peerCount: roomPeers.size }, 'Peer joined');
         break;
       }
 
