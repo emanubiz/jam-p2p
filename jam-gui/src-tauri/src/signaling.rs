@@ -91,6 +91,13 @@ impl SignalingClient {
             Err(e) => {
                 tracing::warn!("Connection failed: {:?}", e);
                 let _ = res_tx.send(Err(format!("Connection failed: {}", e)));
+                // If this was a reconnect attempt (a prior session exists), the
+                // success path that spawns the reader — and thus emits the next
+                // Disconnected — never ran. Re-emit it here so the exponential
+                // backoff loop keeps retrying instead of giving up after one try.
+                if self.last_join.is_some() {
+                    let _ = self.ws_event_tx.send(WsEvent::Disconnected);
+                }
             }
         }
     }

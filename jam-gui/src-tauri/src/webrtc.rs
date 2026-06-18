@@ -88,20 +88,12 @@ impl PeerManager {
                     self.peers.insert(pid, pc);
                 }
             }
-            SignalMessage::NewPeer { uuid: pid } => {
-                if self.peers.contains_key(&pid) {
-                    return Ok(());
-                }
-                let pc = self.create_peer_connection(pid.clone(), ctx).await?;
-                let offer = pc.create_offer(None).await?;
-                pc.set_local_description(offer.clone()).await?;
-                let sdp = serde_json::to_string(&offer).context("failed to serialize offer")?;
-                let _ = ctx.sig_tx.send(SignalMessage::Offer {
-                    target: pid.clone(),
-                    sdp,
-                    from: None,
-                });
-                self.peers.insert(pid, pc);
+            SignalMessage::NewPeer { .. } => {
+                // The newcomer received us in its PeerList and will send the
+                // offer; we answer in the Offer handler. Offering here too would
+                // make both sides offer simultaneously (glare) — each then hits
+                // the `contains_key` guard below and drops the other's offer, so
+                // no answer is ever produced and negotiation stalls.
             }
             SignalMessage::PeerLeft { uuid: pid } => {
                 if let Some(pc) = self.peers.remove(&pid) {

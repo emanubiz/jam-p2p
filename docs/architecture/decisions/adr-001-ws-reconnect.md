@@ -151,3 +151,18 @@ The dedicated `WsEvent` channel was chosen because it provides clean
 separation of concerns — the WS lifecycle is handled independently from
 application-level signaling messages — while remaining simple and idiomatic
 with tokio's mpsc pattern.
+
+## Amendment (2026-06-18): backoff must survive a failed retry
+
+The `ws_event_rx` branch drives reconnection by: backoff sleep → `connect()`.
+The next retry, however, only happens when another `WsEvent::Disconnected`
+arrives, and that event is emitted by the WS **reader task** — which `connect()`
+spawns *only on success*. So if a reconnect attempt failed (server still down),
+no reader task was spawned, no further `Disconnected` was ever sent, and the
+exponential-backoff loop silently gave up after a single failed attempt.
+
+Fix: `connect()` now re-emits `WsEvent::Disconnected` on its failure path **when
+a prior session exists** (`self.last_join.is_some()`), so the loop schedules the
+next backoff attempt and keeps retrying until it succeeds or the user leaves. The
+`last_join` guard ensures an *initial* connect failure (no prior session) still
+surfaces as a one-shot error to the UI instead of entering a reconnect loop.

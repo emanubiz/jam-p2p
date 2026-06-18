@@ -73,7 +73,8 @@ function App() {
   const handleBitrateChange = useCallback(
     (value: number) => {
       setBitrate(value);
-      invoke("set_opus_bitrate", { bitrate: value }).catch(console.warn);
+      // UI is in kbps; the Opus encoder expects bits/s.
+      invoke("set_opus_bitrate", { bitrate: value * 1000 }).catch(console.warn);
     },
     []
   );

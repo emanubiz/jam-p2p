@@ -7,12 +7,12 @@
 - **Stack**: Tauri v2 + React + Rust (cpal, Opus, webrtc-rs) + Node.js signaling
 - **Repo**: https://github.com/emanubiz/jam-p2p/
 
-## Current Status (2026-06-16)
+## Current Status (2026-06-18)
 
 | Area | Status | Notes |
 |---|---|---|
 | Signaling server | ✅ Complete | WebSocket + HTTP API, heartbeat, STUN/TURN, Docker, rate limiting (WS + HTTP), message validation, graceful shutdown |
-| Rust backend | ✅ Complete | cpal audio, Opus codec, WebRTC mesh, mixer, reconnect, mute/save-restore, graceful shutdown, VU throttle, bitrate dedup, 18 unit tests |
+| Rust backend | ✅ Complete | cpal audio (forced Opus sample rate), Opus codec, WebRTC single-offerer mesh, RT-safe mixer, fault-tolerant reconnect, mute/save-restore, graceful shutdown, VU throttle, bitrate clamp+dedup, 23 unit tests |
 | Frontend UI | ✅ Refactored | Component-based architecture (7 components + hook), volume controls, VU meters, settings panel, keyboard shortcuts, 5 rendering tests |
 | Mesh signaling tests | ✅ Verified | 3-peer (6 conns), 5-peer (20 conns) |
 | CI/CD pipeline | ✅ Configured | Linux, macOS (Intel + ARM), Windows builds, GitHub Release on tag |
@@ -61,10 +61,10 @@
 - [x] Mute/Unmute with volume save/restore
 - [x] Encoder graceful shutdown (watch channel)
 - [x] Double join guard (`connected` AtomicBool)
-- [x] NewPeer handling (auto-create PC + offer)
+- [x] NewPeer handling (informational; existing peers answer the newcomer's offer)
 - [x] PeerLeft signaling (cleanup + UI event)
 - [x] Code modularized (8 modules)
-- [x] Unit tests (18 tests: audio level computation)
+- [x] Unit tests (23 tests: audio level computation + Opus sample-rate selection)
 - [x] ESLint + TypeScript strict mode
 - [x] Clippy configuration
 
@@ -103,6 +103,14 @@
 - [x] Italian error messages → English
 - [x] HTTP rate limiting (100 req/sec per IP)
 
+### ✅ Phase 7.5: Critical Audit Fixes (2026-06-18)
+- [x] **Audio**: force an Opus-compatible sample rate (8/12/16/24/48 kHz) shared by both devices — previously the device default (often 44.1 kHz) made Opus init fail and produced *silent* no-audio while the UI showed "connected"
+- [x] **Audio**: bitrate slider now converts kbps → bits/s and the encoder clamps to 8–256 kbps — previously moving the slider sent e.g. `64` bits/s and collapsed quality
+- [x] **WebRTC**: single-offerer mesh — only the joining peer offers (existing peers answer on `NewPeer`/`Offer`); removes the double-offer glare that left connections stuck with no answer
+- [x] **Reconnect**: `connect()` re-emits `WsEvent::Disconnected` on a failed *reconnect* so exponential backoff keeps retrying instead of giving up after one failed attempt (see ADR-001 amendment)
+- [x] **Real-time audio**: output callback uses `try_lock` (never blocks the RT thread); encoder no longer locks the shared mixer mutex, removing playback-starving contention
+- [x] **Tests**: 5 new unit tests for Opus sample-rate selection (`pick_common_opus_rate`)
+
 ## Remaining Work
 
 ### Phase 8: Cross-Platform Build & Release
@@ -124,6 +132,16 @@
 - [ ] SFU topology option for >6 peers
 - [ ] Benchmark suite (latency, CPU, memory)
 
+### Phase 9.1: Remaining Audit Items (from 2026-06-18 review)
+> Identified during the critical-fix audit but **not yet fixed** — tracked here.
+- [ ] **Security**: `GET /room/:name` + `Access-Control-Allow-Origin: *` let any website enumerate room peer UUIDs → restrict CORS and/or gate room info behind auth
+- [ ] **Security**: signaling has no authentication — anyone can join any room (eavesdrop/inject); pairs with WSS + room passwords above
+- [ ] **Reliability**: `backend.connected` is never reset to `false` on WS drop → after a failed reconnect the UI is stuck "disconnected" and manual rejoin is rejected with "Already connected"
+- [ ] **Signaling**: re-`Join` without `Leave` leaks the previous room membership (ghost peer until heartbeat) — remove peer from its old room on a new Join
+- [ ] **DoS**: no cap on peers-per-room or total rooms → unbounded memory; add limits
+- [ ] **Cleanup**: server-provided `iceServers` (in `Welcome`) are ignored by the Rust client, which hardcodes them in `config.rs` — wire one source of truth
+- [ ] **Cleanup**: `name` is plumbed through `Join` but the server ignores it and the UI hardcodes `"user"` — add a name input or drop the field
+
 ## Next Actions
 
 1. **Push to GitHub** → trigger CI/CD pipeline, verify multi-platform builds
@@ -135,4 +153,4 @@
 
 ---
 
-**Last updated**: 2026-06-16
+**Last updated**: 2026-06-18

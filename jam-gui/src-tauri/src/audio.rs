@@ -30,17 +30,59 @@ pub struct AudioDevice {
     pub mixer_sources: Arc<Mutex<MixerMap>>,
 }
 
+/// Opus-supported sample rates, highest first (we prefer 48 kHz).
+pub const OPUS_SAMPLE_RATES: [u32; 5] = [48_000, 24_000, 16_000, 12_000, 8_000];
+
+/// Collect (min, max) sample-rate ranges that advertise f32 support.
+fn collect_f32_rate_ranges<I>(configs: I) -> Vec<(u32, u32)>
+where
+    I: Iterator<Item = cpal::SupportedStreamConfigRange>,
+{
+    configs
+        .filter(|c| c.sample_format() == cpal::SampleFormat::F32)
+        .map(|c| (c.min_sample_rate().0, c.max_sample_rate().0))
+        .collect()
+}
+
+/// Highest Opus-valid sample rate supported by BOTH range sets, or None.
+///
+/// Opus only accepts 8/12/16/24/48 kHz. Encoder, decoder, and both audio
+/// streams must agree on one rate, otherwise Opus init fails outright or
+/// playback is pitch-shifted by an input/output rate mismatch.
+pub fn pick_common_opus_rate(in_ranges: &[(u32, u32)], out_ranges: &[(u32, u32)]) -> Option<u32> {
+    OPUS_SAMPLE_RATES.iter().copied().find(|&r| {
+        in_ranges.iter().any(|&(min, max)| r >= min && r <= max)
+            && out_ranges.iter().any(|&(min, max)| r >= min && r <= max)
+    })
+}
+
 pub fn init_audio() -> Result<AudioDevice> {
     let host = cpal::default_host();
     let input_dev = host.default_input_device().context("no input device")?;
     let output_dev = host.default_output_device().context("no output device")?;
-    let config_in: cpal::StreamConfig = input_dev.default_input_config()?.into();
-    let config_out: cpal::StreamConfig = output_dev.default_output_config()?.into();
 
-    let sample_rate: u32 = config_in.sample_rate.0;
-    let in_channels: usize = config_in.channels as usize;
-    let out_channels: usize = config_out.channels as usize;
+    // Force a single Opus-compatible rate shared by input, output, encoder and
+    // decoder. Picking the device default (often 44.1 kHz) silently breaks Opus.
+    let in_ranges = collect_f32_rate_ranges(input_dev.supported_input_configs()?);
+    let out_ranges = collect_f32_rate_ranges(output_dev.supported_output_configs()?);
+    let sample_rate = pick_common_opus_rate(&in_ranges, &out_ranges).context(
+        "no Opus-compatible f32 sample rate (8/12/16/24/48 kHz) supported by both input and output devices",
+    )?;
+
+    let in_channels: usize = input_dev.default_input_config()?.channels() as usize;
+    let out_channels: usize = output_dev.default_output_config()?.channels() as usize;
     let samples_per_frame: usize = (sample_rate as usize * FRAME_SIZE_MS) / 1000;
+
+    let config_in = cpal::StreamConfig {
+        channels: in_channels as u16,
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
+    let config_out = cpal::StreamConfig {
+        channels: out_channels as u16,
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
 
     let rb_mic = HeapRb::<f32>::new(sample_rate as usize * RING_BUFFER_SIZE_MULT);
     let (mut mic_prod, mic_cons) = rb_mic.split();
@@ -79,7 +121,9 @@ pub fn init_audio() -> Result<AudioDevice> {
             } else {
                 0
             };
-            if let Ok(mut sources) = mixer_injector.lock() {
+            // Real-time callback: never block. If the mixer map is being
+            // mutated elsewhere, output the silence we already filled in.
+            if let Ok(mut sources) = mixer_injector.try_lock() {
                 for frame in 0..frames {
                     let mut mixed = 0.0f32;
                     for (_, (consumer, vol)) in sources.iter_mut() {
@@ -128,7 +172,6 @@ impl EncoderHandle {
 pub fn start_encoder_thread(
     track: Arc<TrackLocalStaticRTP>,
     mut mic_cons: HeapCons<f32>,
-    mixer_sources: Arc<Mutex<MixerMap>>,
     sample_rate: u32,
     samples_per_frame: usize,
     opus_bitrate: Arc<AtomicI32>,
@@ -160,35 +203,24 @@ pub fn start_encoder_thread(
                 break;
             }
 
-            let br = opus_bitrate.load(Ordering::Relaxed);
+            // Clamp to Opus' usable range; the UI sends bits/s and a stray
+            // value (e.g. raw kbps) must not wedge the encoder at the minimum.
+            let br = opus_bitrate.load(Ordering::Relaxed).clamp(8_000, 256_000);
             if br != cached_bitrate {
                 let _ = encoder.set_bitrate(Bitrate::Bits(br));
                 cached_bitrate = br;
             }
+            // Fill one frame straight from the mic ring buffer. No mixer lock
+            // here — that lock is shared with the real-time output callback,
+            // and holding it per-sample starved playback.
             while pcm_buf.len() < samples_per_frame {
                 if *shutdown_rx.borrow() {
                     return;
                 }
-                if let Ok(sources) = mixer_sources.lock() {
-                    let peer_count = sources.len();
-                    if peer_count == 0 {
-                        if let Some(s) = mic_cons.try_pop() {
-                            pcm_buf.push(s);
-                            while pcm_buf.len() < samples_per_frame {
-                                if let Some(s) = mic_cons.try_pop() {
-                                    pcm_buf.push(s);
-                                } else {
-                                    break;
-                                }
-                            }
-                        } else {
-                            thread::sleep(Duration::from_millis(1));
-                        }
-                    } else {
-                        if let Some(s) = mic_cons.try_pop() {
-                            pcm_buf.push(s);
-                        }
-                    }
+                if let Some(s) = mic_cons.try_pop() {
+                    pcm_buf.push(s);
+                } else {
+                    thread::sleep(Duration::from_millis(1));
                 }
             }
             if let Ok(len) = encoder.encode_float(&pcm_buf, &mut out_buf) {
@@ -444,6 +476,41 @@ mod tests {
             level_high >= level_low,
             "higher prev_level should preserve ordering"
         );
+    }
+
+    #[test]
+    fn test_pick_rate_prefers_48k() {
+        // Device advertises a wide range covering everything → prefer 48 kHz.
+        let r = pick_common_opus_rate(&[(8_000, 48_000)], &[(8_000, 48_000)]);
+        assert_eq!(r, Some(48_000));
+    }
+
+    #[test]
+    fn test_pick_rate_skips_unsupported_44100() {
+        // A 44.1 kHz-only device has no Opus-valid rate → None (clear failure,
+        // not a silent broken encoder).
+        let r = pick_common_opus_rate(&[(44_100, 44_100)], &[(44_100, 44_100)]);
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn test_pick_rate_intersection() {
+        // Input tops out at 24 kHz, output supports 48 kHz too → common max is 24 kHz.
+        let r = pick_common_opus_rate(&[(16_000, 24_000)], &[(8_000, 48_000)]);
+        assert_eq!(r, Some(24_000));
+    }
+
+    #[test]
+    fn test_pick_rate_no_overlap() {
+        // Input only 8 kHz, output only 48 kHz → no shared Opus rate.
+        let r = pick_common_opus_rate(&[(8_000, 8_000)], &[(48_000, 48_000)]);
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn test_pick_rate_empty_ranges() {
+        assert_eq!(pick_common_opus_rate(&[], &[(8_000, 48_000)]), None);
+        assert_eq!(pick_common_opus_rate(&[(8_000, 48_000)], &[]), None);
     }
 
     #[test]

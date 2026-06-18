@@ -233,7 +233,8 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 - **WebRTC via Rust (webrtc-rs)** — Lower latency than browser WebRTC, direct audio pipeline access
 - **RTP tracks** — Audio streams via RTP (not data channels), native to the WebRTC media pipeline
 - **Opus VoIP mode** — 64 kbps default, 20ms frames, optimized for speech/music
-- **Full mesh** — Every peer connects to every other peer. Simple, lowest latency. Suitable for 2–6 peers.
+- **Forced Opus sample rate** — input, output, encoder and decoder share one Opus-valid rate (48/24/16/12/8 kHz, prefers 48 kHz); avoids the silent no-audio that a 44.1 kHz device default would otherwise cause
+- **Full mesh (single-offerer)** — Every peer connects to every other peer; only the joining peer offers, existing peers answer (no glare). Simple, lowest latency. Suitable for 2–6 peers.
 - **Soft clipping (tanh)** — Prevents harsh distortion when multiple streams are summed
 
 ### Configuration (`config.rs`)
@@ -292,7 +293,7 @@ cd jam-gui/src-tauri && cargo test
 
 ### Test Coverage
 
-- **Rust**: 18 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN safety, clipping, extreme values, convergence)
+- **Rust**: 23 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN safety, clipping, extreme values, convergence) and Opus sample-rate selection (`pick_common_opus_rate`)
 - **Frontend**: 5 rendering tests (logo, connection form, inputs, component structure)
 - **Signaling**: Integration test scripts in `docs/testing/scripts/`
 

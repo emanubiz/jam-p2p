@@ -87,7 +87,6 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
     let encoder_handle = start_encoder_thread(
         local_track.clone(),
         audio.mic_consumer,
-        mixer_sources.clone(),
         audio.sample_rate,
         audio.samples_per_frame,
         opus_bitrate.clone(),

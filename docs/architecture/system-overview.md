@@ -63,9 +63,9 @@ jam-p2p is a real-time P2P audio jam application that enables musicians to colla
 | Module | Responsibility |
 |---|---|
 | `main.rs` | Entry point, Tauri setup, backend event loop with graceful shutdown |
-| `audio.rs` | cpal I/O, Opus encoder thread (bitrate dedup, VU throttle), mixer, VU computation, 18 unit tests |
-| `webrtc.rs` | PeerConnection creation, signal handler, track management, ICE error logging, VU throttle |
-| `signaling.rs` | WebSocket client, reconnect with exponential backoff, shutdown-aware reader task |
+| `audio.rs` | cpal I/O, forced Opus-compatible sample rate (48/24/16/12/8 kHz), Opus encoder thread (bitrate clamp + dedup, VU throttle), real-time-safe mixer (`try_lock`), VU computation, 23 unit tests |
+| `webrtc.rs` | PeerConnection creation, signal handler (single-offerer mesh), track management, ICE error logging, VU throttle |
+| `signaling.rs` | WebSocket client, reconnect with exponential backoff that survives failed retries, shutdown-aware reader task |
 | `state.rs` | Tauri state + 5 commands (join, leave, volume, bitrate, mute), English error messages |
 | `messages.rs` | `SignalMessage` + `AppCommand` + `WsEvent` enums |
 | `config.rs` | Constants (frame size, bitrate, EMA alpha, VU throttle, reconnect delays, ICE servers) |
@@ -122,6 +122,13 @@ The WS reader task also respects the shutdown signal via its own `tokio::select!
 | Bidirectional | `Answer` | `{ target/from, sdp }` |
 | Bidirectional | `Ice` | `{ target/from, candidate }` |
 
+**Offer direction (glare avoidance):** for any pair of peers exactly one side
+offers — the **joining** peer offers to everyone in its `PeerList`, and existing
+peers answer when the offer arrives. `NewPeer` is purely informational: existing
+peers do **not** offer back, otherwise both sides would offer simultaneously
+(glare), each would drop the other's offer via the `contains_key` guard, and no
+answer would ever be produced.
+
 ### HTTP API
 
 | Endpoint | Method | Response |
@@ -169,7 +176,7 @@ PCM samples ──► RMS ──► 20 * log10(RMS) ──► normalize [-60dB, 
 | `join_room` | `{ room, name, server }` | `Result<(), String>` | Guard: already connected → error |
 | `leave_room` | — | `Result<(), String>` | Guard: not connected → error |
 | `set_volume` | `{ peer_id, vol }` | `Result<(), String>` | |
-| `set_opus_bitrate` | `{ bitrate }` | `Result<(), String>` | |
+| `set_opus_bitrate` | `{ bitrate }` | `Result<(), String>` | Value in bits/s (UI converts kbps → bits/s); clamped 8–256 kbps in the encoder |
 | `set_muted` | `{ muted }` | `Result<(), String>` | Save/restore volumes |
 
 ## Tauri Events
@@ -191,13 +198,19 @@ WebRTC peer connections are managed in the Rust backend via `webrtc-rs`, not in 
 Audio streams via RTP tracks using `TrackLocalStaticRTP`. RTP is designed for real-time media with built-in timing/sequencing, and integrates natively with the WebRTC media pipeline.
 
 ### Opus Codec
-Opus in VoIP mode at 64 kbps default, 20ms frames. Opus is the standard for WebRTC audio, optimized for speech/music, with low latency and variable bitrate support.
+Opus in VoIP mode at 64 kbps default, 20ms frames. Opus is the standard for WebRTC audio, optimized for speech/music, with low latency and variable bitrate support. The UI slider is in **kbps** and is converted to **bits/s** before reaching the encoder; the encoder additionally clamps the value to a safe range (8–256 kbps).
+
+### Sample Rate Selection
+Opus only accepts 8/12/16/24/48 kHz. The default device config is often 44.1 kHz, which would make Opus init fail and silently produce no audio. `init_audio()` therefore inspects the f32 sample-rate ranges advertised by **both** the input and output devices and picks the highest Opus-valid rate common to both (preferring 48 kHz). The encoder, decoder, and both cpal streams all share that single rate, so there is no input/output mismatch (which would pitch-shift playback). If no common Opus rate exists, startup fails loudly instead of running broken.
 
 ### Full Mesh Topology
 Every peer connects to every other peer. Simplest topology with the lowest latency (direct P2P). Suitable for small groups (2–6 peers).
 
 ### Soft Clipping (tanh)
 The mixer uses `tanh()` for soft clipping instead of hard clipping. This prevents harsh distortion when multiple audio streams are summed, producing warmer sound.
+
+### Real-Time-Safe Mixing
+The cpal output callback runs on a real-time audio thread and must never block. It acquires the per-peer mixer map with `try_lock()` (not `lock()`); if the map is momentarily held elsewhere it outputs the already-zero-filled silence for that callback rather than stalling and causing an xrun. The encoder thread no longer touches that mutex at all — it fills frames straight from the mic ring buffer — which removes the lock contention that previously starved playback.
 
 ### Graceful Shutdown via Watch Channel
 A `tokio::sync::watch` channel signals shutdown from the main thread to the backend event loop and WS reader tasks. This ensures clean teardown of the encoder, peer connections, and signaling client.
@@ -246,5 +259,7 @@ Full mesh becomes impractical above ~6–8 peers due to O(N²) bandwidth, CPU, a
 
 ---
 
-**Last Updated**: 2026-06-16
+**Last Updated**: 2026-06-18
 **Status**: Backend and frontend complete, ready for E2E testing and production hardening
+
+> **2026-06-18 — critical-fix pass:** forced Opus-compatible sample rate (no more silent no-audio on 44.1 kHz devices), bitrate slider kbps→bits/s conversion + encoder clamp, single-offerer mesh (glare fix), reconnect loop that survives failed retries, and a real-time-safe (`try_lock`) mixer. Remaining audit items (signaling auth, WSS, per-room peer caps, room enumeration via CORS) are tracked in `ROADMAP.md`.
