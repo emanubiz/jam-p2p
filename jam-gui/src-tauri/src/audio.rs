@@ -1,13 +1,14 @@
 use anyhow::{Context, Result};
 use bytes::BytesMut;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use parking_lot::Mutex;
 use ringbuf::{
     traits::{Consumer, Producer, Split},
     HeapCons, HeapRb,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -125,7 +126,11 @@ pub fn init_audio() -> Result<AudioDevice> {
             };
             // Real-time callback: never block. If the mixer map is being
             // mutated elsewhere, output the silence we already filled in.
-            if let Ok(mut sources) = mixer_injector.try_lock() {
+            // `parking_lot::Mutex::try_lock` returns `Option<MutexGuard>`
+            // (no Result wrapper) and its fast path is lockless — safe to call
+            // from the real-time output callback without risk of a futex
+            // syscall starving the audio thread.
+            if let Some(mut sources) = mixer_injector.try_lock() {
                 for frame in 0..frames {
                     let mut mixed = 0.0f32;
                     for (_, (consumer, vol)) in sources.iter_mut() {

@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use opus::{Channels, Decoder};
 use ringbuf::{traits::Producer, traits::Split, HeapRb};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::mpsc;
 use ::webrtc::ice_transport::ice_server::RTCIceServer;
@@ -234,7 +235,7 @@ impl PeerManager {
                 tracing::info!("Received track from peer {}", p_inner);
                 let rb = HeapRb::<f32>::new(sample_rate as usize * RING_BUFFER_SIZE_MULT);
                 let (mut prod, cons) = rb.split();
-                if let Ok(mut s) = mixer_inner.lock() {
+                if let Some(mut s) = mixer_inner.lock().as_mut() {
                     s.insert(p_inner.clone(), (cons, 1.0));
                 }
                 let mut dec = match Decoder::new(sample_rate, Channels::Mono) {
@@ -262,7 +263,7 @@ impl PeerManager {
                     }
                 }
                 tracing::info!("Track from peer {} ended", p_inner);
-                if let Ok(mut s) = mixer_inner.lock() {
+                if let Some(mut s) = mixer_inner.lock().as_mut() {
                     s.remove(&p_inner);
                 }
             })

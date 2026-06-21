@@ -1,5 +1,6 @@
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tauri::State;
 use tokio::sync::mpsc;
 
@@ -14,9 +15,7 @@ pub struct BackendState {
     pub connected: Arc<AtomicBool>,
 }
 
-pub fn init_state(
-    tx: mpsc::Sender<AppCommand>,
-) -> (AppState, BackendState) {
+pub fn init_state(tx: mpsc::Sender<AppCommand>) -> (AppState, BackendState) {
     let connected = Arc::new(AtomicBool::new(false));
     (
         AppState {
@@ -39,7 +38,7 @@ pub async fn join_room(
     }
     let (res_tx, res_rx) = tokio::sync::oneshot::channel();
     {
-        let tx = state.tx.lock().map_err(|e| e.to_string())?;
+        let tx = state.tx.lock();
         tx.send(AppCommand::Join {
             room,
             name,
@@ -63,7 +62,7 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
     // connected flag flip is a no-op when already false.
     let (res_tx, res_rx) = tokio::sync::oneshot::channel();
     {
-        let tx = state.tx.lock().map_err(|e| e.to_string())?;
+        let tx = state.tx.lock();
         tx.send(AppCommand::Leave { res_tx })
             .await
             .map_err(|e| e.to_string())?;
@@ -80,7 +79,7 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn set_volume(state: State<'_, AppState>, peer_id: String, vol: f32) -> Result<(), String> {
-    let tx = state.tx.lock().map_err(|e| e.to_string())?;
+    let tx = state.tx.lock();
     tx.send(AppCommand::SetVolume { peer_id, vol })
         .await
         .map_err(|e| e.to_string())?;
@@ -89,7 +88,7 @@ pub async fn set_volume(state: State<'_, AppState>, peer_id: String, vol: f32) -
 
 #[tauri::command]
 pub async fn set_opus_bitrate(state: State<'_, AppState>, bitrate: i32) -> Result<(), String> {
-    let tx = state.tx.lock().map_err(|e| e.to_string())?;
+    let tx = state.tx.lock();
     tx.send(AppCommand::SetOpusBitrate { bitrate })
         .await
         .map_err(|e| e.to_string())?;
@@ -98,7 +97,7 @@ pub async fn set_opus_bitrate(state: State<'_, AppState>, bitrate: i32) -> Resul
 
 #[tauri::command]
 pub async fn set_muted(state: State<'_, AppState>, muted: bool) -> Result<(), String> {
-    let tx = state.tx.lock().map_err(|e| e.to_string())?;
+    let tx = state.tx.lock();
     tx.send(AppCommand::SetMute { muted })
         .await
         .map_err(|e| e.to_string())?;

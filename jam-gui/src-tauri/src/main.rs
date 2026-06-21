@@ -9,9 +9,9 @@ mod state;
 mod webrtc;
 
 use anyhow::Result;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
 use tauri::Emitter;
 use tokio::sync::mpsc;
 use ::webrtc::api::media_engine::MediaEngine;
@@ -84,8 +84,11 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
     );
 
     let opus_bitrate = Arc::new(AtomicI32::new(crate::config::DEFAULT_OPUS_BITRATE));
-    let saved_volumes: Arc<StdMutex<Vec<(String, f32)>>> =
-        Arc::new(StdMutex::new(Vec::new()));
+    // parking_lot::Mutex (no PoisonError): the real-time audio callback in
+    // audio.rs holds the mixer lock via `try_lock`, and the shutdown path
+    // never poisons the mutex.
+    let saved_volumes: Arc<Mutex<Vec<(String, f32)>>> =
+        Arc::new(Mutex::new(Vec::new()));
 
     let encoder_handle = start_encoder_thread(
         local_track.clone(),
@@ -121,9 +124,7 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
                 sig_client.leave().await;
                 peer_manager.close_all(&handle).await;
                 encoder_handle.shutdown();
-                if let Ok(mut sources) = mixer_sources.lock() {
-                    sources.clear();
-                }
+                mixer_sources.lock().clear();
                 // run_backend returns Result<()>; the select! arm must produce a
                 // matching type, so we break with Ok(()) rather than `()`.
                 break Ok(());
@@ -138,43 +139,39 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
                         peer_manager.close_all(&handle).await;
                         my_id = None;
                         // Clear saved volumes when leaving room
-                        if let Ok(mut vols) = saved_volumes.lock() {
-                            vols.clear();
-                        }
+                        saved_volumes.lock().clear();
                         let _ = res_tx.send(Ok(()));
                     }
                     AppCommand::SetVolume { peer_id, vol } => {
-                        if let Ok(mut sources) = mixer_sources.lock() {
-                            if let Some((_, v)) = sources.get_mut(&peer_id) {
-                                *v = vol;
-                            }
+                        let mut sources = mixer_sources.lock();
+                        if let Some((_, v)) = sources.get_mut(&peer_id) {
+                            *v = vol;
                         }
                     }
                     AppCommand::SetOpusBitrate { bitrate } => {
                         opus_bitrate.store(bitrate, Ordering::Relaxed);
                     }
                     AppCommand::SetMute { muted } => {
-                        if let Ok(mut sources) = mixer_sources.lock() {
-                            if muted {
-                                let Ok(mut vols) = saved_volumes.lock() else { continue };
-                                vols.clear();
-                                for (peer_id, (_, vol)) in sources.iter() {
-                                    vols.push((peer_id.clone(), *vol));
-                                }
-                                for (_, vol) in sources.values_mut() {
-                                    *vol = 0.0;
-                                }
-                                tracing::info!("Muted {} peers, volumes saved", vols.len());
-                            } else {
-                                let Ok(vols) = saved_volumes.lock() else { continue };
-                                if vols.is_empty() { continue; }
-                                for (peer_id, vol) in vols.iter() {
-                                    if let Some((_, v)) = sources.get_mut(peer_id) {
-                                        *v = *vol;
-                                    }
-                                }
-                                tracing::info!("Unmuted, {} volumes restored", vols.len());
+                        let mut sources = mixer_sources.lock();
+                        if muted {
+                            let mut vols = saved_volumes.lock();
+                            vols.clear();
+                            for (peer_id, (_, vol)) in sources.iter() {
+                                vols.push((peer_id.clone(), *vol));
                             }
+                            for (_, vol) in sources.values_mut() {
+                                *vol = 0.0;
+                            }
+                            tracing::info!("Muted {} peers, volumes saved", vols.len());
+                        } else {
+                            let vols = saved_volumes.lock();
+                            if vols.is_empty() { continue; }
+                            for (peer_id, vol) in vols.iter() {
+                                if let Some((_, v)) = sources.get_mut(peer_id) {
+                                    *v = *vol;
+                                }
+                            }
+                            tracing::info!("Unmuted, {} volumes restored", vols.len());
                         }
                     }
                 }
