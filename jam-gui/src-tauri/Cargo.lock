@@ -2159,9 +2159,8 @@ dependencies = [
  "bytes",
  "cpal",
  "futures",
- "once_cell",
  "opus",
- "rand 0.8.6",
+ "parking_lot",
  "ringbuf",
  "serde",
  "serde_json",
@@ -2171,8 +2170,6 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
- "url",
- "uuid",
  "webrtc",
 ]
 

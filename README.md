@@ -25,6 +25,7 @@ Jam P2P lets musicians connect over the internet and play together in real time.
 - **Reconnect** — Automatic exponential backoff (1s → 30s max) on connection drops
 - **Graceful shutdown** — Clean teardown of encoder, peer connections, and signaling on app exit
 - **Settings panel** — Adjustable Opus bitrate while connected
+- **Session analytics** — Collapsible per-session metrics (duration, live/peak participants, joins, reconnects) derived locally — no telemetry sent anywhere
 - **Keyboard shortcuts** — `M` to mute, `Esc` to disconnect
 - **Cross-platform** — Linux (.deb, AppImage), macOS (.dmg), Windows (.msi, .exe) via CI/CD
 - **Docker-ready signaling server** — Single `docker compose up` to deploy
@@ -179,9 +180,10 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 | Direction | Type | Payload |
 |---|---|---|
 | Server → Client | `Welcome` | `{ uuid, iceServers }` |
-| Server → Client | `PeerList` | `{ peers: string[] }` |
-| Server → Client | `NewPeer` | `{ uuid }` |
+| Server → Client | `PeerList` | `{ peers: [{ uuid, name }] }` |
+| Server → Client | `NewPeer` | `{ uuid, name }` |
 | Server → Client | `PeerLeft` | `{ uuid }` |
+| Server → Client | `Error` | `{ message }` (e.g. room full / limit reached) |
 | Client → Server | `Join` | `{ room, name }` |
 | Client → Server | `Leave` | — |
 | Bidirectional | `Offer` | `{ target/from, sdp }` |
@@ -262,14 +264,17 @@ App.tsx
 ├── ConnectionForm     — Server/room inputs + connect button
 ├── StatusBar          — Status dot + text + quality badge
 ├── SettingsPanel      — Bitrate slider (collapsible)
+├── AnalyticsPanel     — Per-session metrics strip (collapsible)
 ├── LocalMicCard       — Local mic VU meter
 ├── PeerCard[]         — Per-peer: name, volume slider, VU meter
 │   └── VuMeter        — 20-bar LED-style level display (20 bars, green/blue)
-└── hooks/useTauriEvents() — Hook managing 7 Tauri event listeners
-    └── Returns { peers, localLevel, disconnected, reconnected, serverError, resetPeers, updatePeerVolume, ... }
+├── hooks/useTauriEvents()     — Hook managing 7 Tauri event listeners
+│   └── Returns { peers, localLevel, disconnected, reconnected, serverError, resetPeers, updatePeerVolume, ... }
+└── hooks/useSessionAnalytics() — Derives session duration, peak size, joins, reconnects from status + peer count (no backend calls)
 ```
 
-All peer-facing components use `React.memo` to minimize re-renders.
+All peer-facing components use `React.memo` to minimize re-renders. Each
+component ships its own CSS file; `App.css` holds only global layout.
 
 ### Keyboard Shortcuts
 
@@ -296,8 +301,8 @@ cd jam-gui/src-tauri && cargo test
 ### Test Coverage
 
 - **Rust**: 30 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN/Inf safety, clipping, extreme values, convergence) and Opus sample-rate selection (`pick_common_opus_rate`), plus 7 serde wire-protocol round-trip tests
-- **Frontend**: 6 rendering tests (logo, connection form, inputs, component structure) + display-name label
-- **Signaling**: Jest unit tests + integration test scripts in `docs/testing/scripts/`
+- **Frontend**: 24 Vitest tests — rendering (logo, connection form, inputs, component structure, display-name label), interaction tests (connect/join, error surfacing, mute toggle, disconnect, bitrate change), and analytics-panel tests (duration formatting, stats, collapsed state)
+- **Signaling**: 43 Jest unit tests (`lib/__tests__/`: validation, rate-limit, rooms) + integration test scripts in `docs/testing/scripts/`
 
 ---
 
@@ -329,7 +334,9 @@ Full mesh is practical for 2–6 peers. For larger sessions, an SFU (Selective F
 
 ## Roadmap
 
-See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining issues.
+See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining issues,
+[CHANGELOG.md](./CHANGELOG.md) for the release history, and
+[ANALISI_UNIFICATA.md](./ANALISI_UNIFICATA.md) for the consolidated architecture/quality/security analysis.
 
 **Completed:** Signaling server, Rust backend, WebRTC mesh, UI, CI/CD, graceful shutdown, message validation, VU throttling, component refactoring.
 
@@ -351,7 +358,7 @@ GitHub Actions pipeline (`.github/workflows/build.yml`) runs on every push and p
 
 - **Frontend test job**: Vitest + ESLint + TypeScript typecheck on `ubuntu-latest`
 - **Rust test job**: `cargo test` (30 unit tests), `cargo fmt --check`, `cargo clippy -D warnings`, `cargo audit`
-- **Signaling smoke job**: Jest unit tests + 3-peer mesh signaling integration test + HTTP `/health` and `/ice-servers` smoke
+- **Signaling smoke job**: Jest unit tests (43) + 3-peer mesh signaling integration test + HTTP `/health` and `/ice-servers` smoke
 - **Build matrix**: Tauri release build on Linux (`.deb`, `.AppImage`, `.rpm`), macOS Intel + Apple Silicon (`.dmg`), Windows (`.msi`, `.exe`)
 - **Release**: tags matching `v*` produce a GitHub Release with all platform artifacts attached
 

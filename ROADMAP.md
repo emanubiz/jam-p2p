@@ -7,17 +7,18 @@
 - **Stack**: Tauri v2 + React + Rust (cpal, Opus, webrtc-rs) + Node.js signaling
 - **Repo**: https://github.com/emanubiz/jam-p2p/
 
-## Current Status (2026-06-18)
+## Current Status (2026-06-21)
 
 | Area | Status | Notes |
 |---|---|---|
-| Signaling server | ✅ Complete | WebSocket + HTTP API, heartbeat, STUN/TURN, Docker, rate limiting (WS + HTTP), message validation, graceful shutdown, DoS caps (peers/room, rooms), CORS env, name propagation, Error envelope, re-join leak fix |
-| Rust backend | ✅ Complete | cpal audio (forced Opus sample rate), Opus codec, WebRTC single-offerer mesh, RT-safe mixer, fault-tolerant reconnect, mute/save-restore, graceful shutdown, VU throttle, bitrate clamp+dedup, ICE servers sourced from Welcome, 30 unit tests (23 audio + 7 serde wire protocol) |
-| Frontend UI | ✅ Refactored | Component-based architecture (8 components + shared `AppStatus` type + hook), volume controls, VU meters, settings panel, keyboard shortcuts, display name input, auto-reconnect with Cancel, server-error surfacing, 6 rendering tests |
+| Signaling server | ✅ Complete | WebSocket + HTTP API, heartbeat, STUN/TURN, Docker, rate limiting (WS per-conn + per-IP connect + HTTP), message validation, graceful shutdown, DoS caps (peers/room, rooms), CORS env, name propagation, Error envelope, re-join leak fix. Split into `lib/` modules (`validation`, `rate-limit`, `rooms`) with **43 Jest unit tests** |
+| Rust backend | ✅ Complete | cpal audio (forced Opus sample rate), Opus codec, WebRTC single-offerer mesh, RT-safe mixer (`parking_lot::Mutex`), bounded `mpsc::channel(N)`, `BytesMut` encoder pool, fault-tolerant reconnect, mute/save-restore, graceful shutdown, VU throttle, bitrate clamp+dedup, ICE servers sourced from Welcome, dead deps removed, 30 unit tests (23 audio + 7 serde wire protocol) |
+| Frontend UI | ✅ Refactored | Component-based architecture (7 components + 2 hooks + per-component CSS), volume controls (debounced), VU meters, settings panel, **session analytics panel**, keyboard shortcuts, display name input, auto-reconnect with Cancel, server-error surfacing, **24 Vitest tests** (rendering + interaction + analytics) |
+| Tooling | ✅ Fixed | ESLint migrated to v9 flat config (`eslint.config.mjs`) — the legacy `.eslintrc.json` would have failed the CI lint step |
 | Mesh signaling tests | ✅ Verified | 3-peer (6 conns), 5-peer (20 conns) |
-| CI/CD pipeline | ✅ Active | `.github/workflows/build.yml`: vitest + cargo test + signaling smoke + Linux/macOS(Intel+ARM)/Windows build matrix + GitHub Release on tag `v*` |
+| CI/CD pipeline | ✅ Active | `.github/workflows/build.yml`: vitest + lint + cargo test/fmt/clippy/audit + signaling smoke + Linux/macOS(Intel+ARM)/Windows build matrix + GitHub Release on tag `v*` |
 | ADR documentation | ✅ Written | ADR-001: WsEvent reconnect mechanism |
-| Audio streaming E2E | ⏳ To test | Backend code complete, needs manual verification |
+| Audio streaming E2E | ⏳ To test | Backend code complete; manual procedure written (`docs/testing/E2E-AUDIO-PROCEDURE.md`), execution pending |
 | Local build (Rust) | ⏳ System deps | GTK3 deps needed locally; CI builds successfully |
 
 ## Completed Phases
@@ -128,7 +129,7 @@
 - [ ] Room authentication / passwords
 - [ ] Error recovery (peer reconnect, stream recovery)
 - [ ] Audio device selection (input/output picker)
-- [ ] Performance monitoring
+- [~] Performance monitoring — basic per-session analytics shipped (`AnalyticsPanel`); live WebRTC `getStats()` (packet loss, jitter, RTT) still pending
 - [ ] SFU topology option for >6 peers
 - [ ] Benchmark suite (latency, CPU, memory)
 
@@ -150,6 +151,28 @@
 - [x] **Code quality**: shared `AppStatus` union across `App.tsx`/`ConnectionForm.tsx`; `PeerManager.names` cleaned on `PeerLeft`
 
 > **Deferred to a future round** (still in Phase 9): signaling WSS, room authentication, own TURN server. These are deployment concerns, not block-level correctness.
+
+### ✅ Phase 8: Compendium Hardening — Completed (2026-06-21)
+> Implementation of the unified cross-analysis plan (`ANALISI_UNIFICATA.md`). Every
+> item below maps to a P0–P3 priority from that document.
+- [x] **P0.1 — CI/CD**: `.github/workflows/build.yml` created (vitest + lint + cargo test/fmt/clippy/audit + signaling smoke + 4-target Tauri build matrix + tagged GitHub Release)
+- [x] **P0.2 — E2E audio**: manual verification procedure documented (`docs/testing/E2E-AUDIO-PROCEDURE.md`) — execution still pending hardware
+- [x] **P0.3 — Doc alignment**: README/ROADMAP/system-overview reconciled with code (Tauri events, `peer-joined` object, `/room/:name`, test counts)
+- [x] **P1.1 — Dead deps removed**: `url`, `uuid`, `once_cell`, `rand` dropped from `Cargo.toml`
+- [x] **P1.2 — Repo hygiene**: `test_standalone/target/` untracked from git
+- [x] **P1.3 — `.env.example`** completed (`MAX_PEERS_PER_ROOM`, `MAX_ROOMS`, `ALLOWED_ORIGIN`, `WS_CONNECT_LIMIT_PER_IP`)
+- [x] **P1.4 — Italian comments** translated to English (`Dockerfile`, `logger.rs`)
+- [x] **P1.5 — Bounded channels**: `mpsc::channel(256/64)` replaces `unbounded_channel` (backpressure)
+- [x] **P2.1 — Signaling modularization**: `server.js` → `lib/{validation,rate-limit,rooms}.js`
+- [x] **P2.5 — Frontend interaction tests**: 6 → 21 Vitest tests
+- [x] **P2.6 — Signaling unit tests**: 43 Jest tests across the three `lib/` modules
+- [x] **P2.7 — Per-IP WS connect rate limit**: `WS_CONNECT_LIMIT_PER_IP` (default 10/s)
+- [x] **P3.1 — `parking_lot::Mutex`** for mixer + saved-volumes (true RT-safe `try_lock`)
+- [x] **P3.3 — `BytesMut` encoder pool**: removes ~50 alloc/s on the encode hot path
+- [x] **P3.4 — Debounced volume slider**: 50 ms optimistic debounce on `set_volume`
+- [x] **P2.4 — Per-component CSS split**: `App.css` monolith → one CSS file per component
+- [x] **Session analytics** (beyond the original plan): privacy-safe `useSessionAnalytics` hook + collapsible `AnalyticsPanel` (duration, live/peak participants, joins, reconnects) — no telemetry leaves the device
+- [x] **ESLint v9 flat config** (`eslint.config.mjs`): fixes a CI-breaking lint step left by the eslint ^9 upgrade against a legacy `.eslintrc.json`
 
 ## Next Actions
 
