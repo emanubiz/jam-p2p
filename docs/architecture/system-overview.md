@@ -10,8 +10,9 @@ jam-p2p is a real-time P2P audio jam application that enables musicians to colla
 ┌─────────────────────────────────────────────────────────────────┐
 │                     jam-gui (Frontend UI)                        │
 │  React + Vite + Tauri v2                                         │
-│  - App.tsx: Compositor for 6 extracted components + 1 custom hook               │
+│  - App.tsx: Compositor for 7 extracted components + 2 custom hooks              │
 │  - useTauriEvents(): Custom hook for all Tauri event listeners  │
+│  - useSessionAnalytics(): Derives per-session metrics from state│
 │  - ConnectionForm, PeerCard, VuMeter, SettingsPanel, etc.       │
 │  - Tauri Commands → Rust backend (join, leave, volume, mute)    │
 │  - Tauri Events ← Rust backend (peer-joined, peer-level, etc.)  │
@@ -76,13 +77,19 @@ jam-p2p is a real-time P2P audio jam application that enables musicians to colla
 ```
 App.tsx (compositor)
 ├── hooks/useTauriEvents.ts    — Manages 7 Tauri event listeners, returns { peers, localLevel, disconnected, reconnected, serverError, ... }
+├── hooks/useSessionAnalytics.ts — Derives per-session metrics (duration, peak size, joins, reconnects) purely from status + peer count; no backend calls
 ├── components/ConnectionForm.tsx — Server + room inputs, connect button (React.memo)
 ├── components/StatusBar.tsx      — Status dot + text + quality badge (React.memo)
 ├── components/SettingsPanel.tsx  — Bitrate slider, collapsible (React.memo)
+├── components/AnalyticsPanel.tsx — Collapsible per-session metrics strip (React.memo)
 ├── components/LocalMicCard.tsx   — Local mic VU meter (React.memo)
 ├── components/PeerCard.tsx        — Per-peer: name, volume slider, VU meter (React.memo)
 │   └── components/VuMeter.tsx     — 20-bar LED-style level meter (React.memo)
 ```
+
+Each component owns its own CSS file (`ConnectionForm.css`, `PeerCard.css`,
+`AnalyticsPanel.css`, …); `App.css` keeps only global layout, leftover from the
+per-component CSS split.
 
 ## Graceful Shutdown Flow
 
@@ -243,8 +250,32 @@ Full mesh becomes impractical above ~6–8 peers due to O(N²) bandwidth, CPU, a
 
 - WebRTC encryption mandatory (DTLS-SRTP)
 - Signaling server: rate limiting (WS + HTTP), message validation, room name validation
-- CSP: `default-src 'self'; script-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline';`
+- CSP: `default-src 'self'; script-src 'self' https://www.googletagmanager.com; connect-src 'self' ws: wss: https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com; img-src 'self' data: https://www.google-analytics.com; style-src 'self' 'unsafe-inline';` (the Google domains are whitelisted only for the GA4 traffic-analytics integration — see below)
 - **Not yet implemented**: room authentication, WSS signaling (TLS), own TURN server
+
+## Traffic Analytics (GA4)
+
+Two distinct analytics concerns, intentionally separate:
+
+| Concern | Module | Audience | Network |
+|---|---|---|---|
+| In-app session stats | `hooks/useSessionAnalytics.ts` + `components/AnalyticsPanel.tsx` | The user (shown live in the 📊 panel) | None — derived purely from local UI state |
+| Aggregate traffic reporting | `ga.ts` + GA4 snippet in `index.html` | The developer / ad networks & sponsors | Google Analytics 4 |
+
+`ga.ts` reports privacy-safe, aggregate events to GA4 so real usage figures
+(active users, sessions, session duration, platform, country, retention) can be
+presented to ad networks or sponsors when monetizing the app. Events emitted:
+
+| Event | Params | Fired when |
+|---|---|---|
+| `room_joined` | `room_name` | `join_room` succeeds |
+| `room_left` | `room_name`, `session_seconds` | `leave_room` |
+| `peer_connected` | `peer_count` | net peer increase while connected |
+| `peer_disconnected` | `peer_count` | net peer decrease while connected |
+
+GA4 also auto-collects page_view, active users, sessions, and platform. The
+sender no-ops cleanly when the `gtag` snippet hasn't loaded (browser dev server
+or before a real `G-XXXXXXXXXX` Measurement ID is configured in `index.html`).
 
 ## CI/CD Pipeline
 
@@ -263,8 +294,10 @@ Full mesh becomes impractical above ~6–8 peers due to O(N²) bandwidth, CPU, a
 ---
 
 **Last Updated**: 2026-06-21
-**Status**: CI/CD active (`.github/workflows/build.yml`), documentation aligned with code (peer-joined payload, 7 Tauri event listeners, 30+6 tests, /room/:name peerCount-only), `mpsc::channel(N)` bounded channels pending (see ROADMAP).
+**Status**: CI/CD active (`.github/workflows/build.yml`), documentation aligned with code (peer-joined payload, 7 Tauri event listeners, 30 Rust + 21 frontend + 43 signaling tests, /room/:name peerCount-only). Bounded `mpsc::channel(N)` channels, `parking_lot::Mutex`, and the `BytesMut` encoder pool are now **landed** (no longer pending).
 
 > **2026-06-18 — critical-fix pass:** forced Opus-compatible sample rate (no more silent no-audio on 44.1 kHz devices), bitrate slider kbps→bits/s conversion + encoder clamp, single-offerer mesh (glare fix), reconnect loop that survives failed retries, and a real-time-safe (`try_lock`) mixer. Remaining audit items (signaling auth, WSS, per-room peer caps, room enumeration via CORS) are tracked in `ROADMAP.md`.
 
 > **2026-06-21 — CI/CD + alignment pass:** added `.github/workflows/build.yml` (vitest + cargo test + signaling smoke + cross-platform Tauri build matrix + GitHub Release on tag), aligned README/ROADMAP/system-overview with code reality (peer-joined payload object, 7 Tauri event listeners including `connected`/`reconnected`/`server-error`, 30 Rust + 6 frontend tests, /room/:name returns `{room, peerCount}` only).
+
+> **2026-06-21 — compendium hardening pass:** implemented the unified-analysis plan — signaling server split into `lib/` modules (`validation`, `rate-limit`, `rooms`) with 43 Jest unit tests; per-IP WS connect rate limit; dead Rust deps removed (`url`/`uuid`/`once_cell`/`rand`); `test_standalone/target` untracked; `.env.example` completed; Italian comments translated; `parking_lot::Mutex` for the mixer/saved-volumes; bounded `mpsc::channel(N)`; `BytesMut` encoder pool; debounced volume slider; per-component CSS split; frontend interaction tests (6 → 21); manual E2E audio procedure (`docs/testing/E2E-AUDIO-PROCEDURE.md`). Added a lightweight, privacy-safe **session analytics** strip in the UI (`useSessionAnalytics` + `AnalyticsPanel`) and fixed a CI-breaking ESLint v9 flat-config gap (`eslint.config.mjs`).
