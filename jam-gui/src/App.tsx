@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useEffect, useCallback, useMemo, useRef, useReducer } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "./hooks/useTauriEvents";
 import { useSessionAnalytics } from "./hooks/useSessionAnalytics";
 import { ga } from "./ga";
-import ConnectionForm from "./components/ConnectionForm";
+import ConnectionForm, { type AppStatus } from "./components/ConnectionForm";
 import SettingsPanel from "./components/SettingsPanel";
 import AnalyticsPanel from "./components/AnalyticsPanel";
 import LocalMicCard from "./components/LocalMicCard";
@@ -16,18 +16,78 @@ import "./App.css";
  *  is throttled so a slider drag doesn't fire `set_volume` for every pixel. */
 const VOLUME_DEBOUNCE_MS = 50;
 
+// ---------------------------------------------------------------------------
+// Session state machine (useReducer replaces 9 useState calls)
+// ---------------------------------------------------------------------------
+
+type SessionState = {
+  room: string;
+  name: string;
+  server: string;
+  status: AppStatus;
+  error: string | null;
+  muted: boolean;
+  bitrate: number;
+  settingsOpen: boolean;
+  analyticsOpen: boolean;
+};
+
+type SessionAction =
+  | { type: "SET_ROOM"; room: string }
+  | { type: "SET_NAME"; name: string }
+  | { type: "SET_SERVER"; server: string }
+  | { type: "SET_STATUS"; status: AppStatus }
+  | { type: "COND_SET_STATUS"; guard: (s: AppStatus) => AppStatus }
+  | { type: "SET_ERROR"; error: string | null }
+  | { type: "TOGGLE_MUTE" }
+  | { type: "SET_BITRATE"; bitrate: number }
+  | { type: "TOGGLE_SETTINGS" }
+  | { type: "TOGGLE_ANALYTICS" };
+
+const initialSessionState: SessionState = {
+  room: "studio1",
+  name: "",
+  server: "ws://localhost:8080",
+  status: "idle",
+  error: null,
+  muted: false,
+  bitrate: 64,
+  settingsOpen: false,
+  analyticsOpen: false,
+};
+
+function sessionReducer(
+  state: SessionState,
+  action: SessionAction
+): SessionState {
+  switch (action.type) {
+    case "SET_ROOM":
+      return { ...state, room: action.room };
+    case "SET_NAME":
+      return { ...state, name: action.name };
+    case "SET_SERVER":
+      return { ...state, server: action.server };
+    case "SET_STATUS":
+      return { ...state, status: action.status };
+    case "COND_SET_STATUS":
+      return { ...state, status: action.guard(state.status) };
+    case "SET_ERROR":
+      return { ...state, error: action.error };
+    case "TOGGLE_MUTE":
+      return { ...state, muted: !state.muted };
+    case "SET_BITRATE":
+      return { ...state, bitrate: action.bitrate };
+    case "TOGGLE_SETTINGS":
+      return { ...state, settingsOpen: !state.settingsOpen };
+    case "TOGGLE_ANALYTICS":
+      return { ...state, analyticsOpen: !state.analyticsOpen };
+  }
+}
+
 function App() {
-  const [room, setRoom] = useState("studio1");
-  const [name, setName] = useState("");
-  const [server, setServer] = useState("ws://localhost:8080");
-  const [status, setStatus] = useState<
-    "idle" | "joining" | "connected" | "reconnecting" | "error"
-  >("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [muted, setMuted] = useState(false);
-  const [bitrate, setBitrate] = useState(64);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [session, dispatch] = useReducer(sessionReducer, initialSessionState);
+  const { room, name, server, status, error, muted, bitrate, settingsOpen, analyticsOpen } =
+    session;
 
   const {
     peers,
@@ -46,6 +106,21 @@ function App() {
   // existing status + peer state (no backend calls, no persistence).
   const analytics = useSessionAnalytics(status, peers.length);
 
+  // Stable callbacks for form inputs — dispatch is stable from useReducer,
+  // so these never cause ConnectionForm (React.memo) to re-render.
+  const onServerChange = useCallback(
+    (s: string) => dispatch({ type: "SET_SERVER", server: s }),
+    []
+  );
+  const onRoomChange = useCallback(
+    (r: string) => dispatch({ type: "SET_ROOM", room: r }),
+    []
+  );
+  const onNameChange = useCallback(
+    (n: string) => dispatch({ type: "SET_NAME", name: n }),
+    []
+  );
+
   // Mirror the live session duration into a ref so `disconnect` can report it
   // to GA4 without taking `analytics` as a dependency (which would rebuild the
   // callback — and re-bind the keyboard listener — on every 1 Hz tick).
@@ -56,21 +131,27 @@ function App() {
     if (disconnected) {
       // Backend auto-reconnects with backoff; show a reconnecting state rather
       // than a fresh form (which would conflict with the in-flight reconnect).
-      setStatus((s) => (s === "idle" ? s : "reconnecting"));
+      dispatch({
+        type: "COND_SET_STATUS",
+        guard: (s) => (s === "idle" ? s : "reconnecting"),
+      });
       clearDisconnected();
     }
   }, [disconnected, clearDisconnected]);
 
   useEffect(() => {
     if (reconnected) {
-      setStatus((s) => (s === "idle" ? s : "connected"));
+      dispatch({
+        type: "COND_SET_STATUS",
+        guard: (s) => (s === "idle" ? s : "connected"),
+      });
       clearReconnected();
     }
   }, [reconnected, clearReconnected]);
 
   useEffect(() => {
     if (serverError) {
-      setError(serverError);
+      dispatch({ type: "SET_ERROR", error: serverError });
       clearServerError();
     }
   }, [serverError, clearServerError]);
@@ -91,30 +172,36 @@ function App() {
   }, [peers.length, status]);
 
   const connect = useCallback(async () => {
-    setStatus("joining");
-    setError(null);
+    dispatch({ type: "SET_STATUS", status: "joining" });
+    dispatch({ type: "SET_ERROR", error: null });
     try {
-      await invoke("join_room", { room, name: name.trim() || "Anonymous", server });
-      ga.roomJoined(room);
-      setStatus("connected");
+      await invoke("join_room", {
+        room: session.room,
+        name: session.name.trim() || "Anonymous",
+        server: session.server,
+      });
+      ga.roomJoined(session.room);
+      dispatch({ type: "SET_STATUS", status: "connected" });
     } catch (err: unknown) {
-      setError(String(err));
-      setStatus("error");
+      dispatch({ type: "SET_ERROR", error: String(err) });
+      dispatch({ type: "SET_STATUS", status: "error" });
     }
-  }, [room, name, server]);
+  }, [session.room, session.name, session.server]);
 
+  // disconnect only needs session.room (for ga.roomLeft reporting); name and
+  // server are irrelevant here because they're only used at connect time.
   const disconnect = useCallback(async () => {
     try {
       await invoke("leave_room");
-      ga.roomLeft(room, elapsedSecRef.current);
+      ga.roomLeft(session.room, elapsedSecRef.current);
       resetPeers();
-      setStatus("idle");
-      setBitrate(64);
+      dispatch({ type: "SET_STATUS", status: "idle" });
+      dispatch({ type: "SET_BITRATE", bitrate: 64 });
     } catch (err: unknown) {
-      setError(String(err));
-      setStatus("error");
+      dispatch({ type: "SET_ERROR", error: String(err) });
+      dispatch({ type: "SET_STATUS", status: "error" });
     }
-  }, [resetPeers, room]);
+  }, [resetPeers, session.room]);
 
   // Optimistic + debounced volume updates. The UI is updated immediately on
   // every change so the slider feels instant; the actual `set_volume` IPC is
@@ -138,19 +225,16 @@ function App() {
   }, [updatePeerVolume]);
 
   const toggleMute = useCallback(() => {
-    const next = !muted;
-    setMuted(next);
+    const next = !session.muted;
+    dispatch({ type: "TOGGLE_MUTE" });
     invoke("set_muted", { muted: next }).catch(console.warn);
-  }, [muted]);
+  }, [session.muted]);
 
-  const handleBitrateChange = useCallback(
-    (value: number) => {
-      setBitrate(value);
-      // UI is in kbps; the Opus encoder expects bits/s.
-      invoke("set_opus_bitrate", { bitrate: value * 1000 }).catch(console.warn);
-    },
-    []
-  );
+  const handleBitrateChange = useCallback((value: number) => {
+    dispatch({ type: "SET_BITRATE", bitrate: value });
+    // UI is in kbps; the Opus encoder expects bits/s.
+    invoke("set_opus_bitrate", { bitrate: value * 1000 }).catch(console.warn);
+  }, []);
 
   useEffect(() => {
     if (status !== "connected") return;
@@ -169,7 +253,7 @@ function App() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [status, muted, toggleMute, disconnect]);
+  }, [status, toggleMute, disconnect]);
 
   const showForm =
     status === "idle" || status === "joining" || status === "error";
@@ -214,9 +298,9 @@ function App() {
               room={room}
               name={name}
               status={status}
-              onServerChange={setServer}
-              onRoomChange={setRoom}
-              onNameChange={setName}
+              onServerChange={onServerChange}
+              onRoomChange={onRoomChange}
+              onNameChange={onNameChange}
               onConnect={connect}
             />
           )}
@@ -280,14 +364,14 @@ function App() {
                   </div>
                   <button
                     className={`settings-toggle ${analyticsOpen ? "open" : ""}`}
-                    onClick={() => setAnalyticsOpen(!analyticsOpen)}
+                    onClick={() => dispatch({ type: "TOGGLE_ANALYTICS" })}
                     title="Session analytics"
                   >
                     📊
                   </button>
                   <button
                     className={`settings-toggle ${settingsOpen ? "open" : ""}`}
-                    onClick={() => setSettingsOpen(!settingsOpen)}
+                    onClick={() => dispatch({ type: "TOGGLE_SETTINGS" })}
                     title="Settings"
                   >
                     ⚙
