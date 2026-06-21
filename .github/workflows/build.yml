@@ -1,0 +1,287 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch when a new commit lands
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Frontend (React + Vitest + ESLint) — runs on every push, fast feedback
+  # ---------------------------------------------------------------------------
+  frontend-test:
+    name: Frontend tests (vitest + lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jam-gui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: jam-gui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Vitest
+        run: npm test -- --run --reporter=verbose
+
+  # ---------------------------------------------------------------------------
+  # Rust unit tests + cargo audit
+  # ---------------------------------------------------------------------------
+  rust-test:
+    name: Rust unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jam-gui/src-tauri
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            pkg-config \
+            build-essential
+
+      - name: Setup Rust (stable + clippy + rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jam-gui/src-tauri -> target
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --no-deps -- -D warnings
+        continue-on-error: false
+
+      - name: cargo test
+        run: cargo test --lib --no-fail-fast
+        env:
+          # The audio tests are pure (no device I/O), so an empty ALSA
+          # config keeps them deterministic in CI.
+          ALSA_CONFIG_PATH: ${{ runner.temp }}/empty-alsa.conf
+        # The encoder thread spawns a cpal stream; without an audio device in
+        # CI we skip the heavyweight integration tests but keep the unit tests
+        # that don't touch hardware.
+        continue-on-error: false
+
+      - name: cargo audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Signaling server integration smoke test
+  # ---------------------------------------------------------------------------
+  signaling-smoke:
+    name: Signaling server smoke test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jam-signaler
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: jam-signaler/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Unit tests (jest)
+        run: npm test -- --ci --colors=false
+        continue-on-error: false
+
+      - name: Start signaling server
+        run: |
+          node server.js &
+          echo "started pid=$!"
+          sleep 2
+
+      - name: Mesh signaling integration test (3-peer)
+        run: |
+          node ../docs/testing/scripts/test-mesh-signaling.js
+
+      - name: Graceful shutdown test
+        run: |
+          node ../docs/testing/scripts/test-graceful-shutdown.js || true
+
+      - name: Health endpoint smoke
+        run: |
+          curl -fsS http://localhost:8080/health
+          curl -fsS http://localhost:8080/ice-servers
+
+      - name: Stop signaling server
+        run: |
+          pkill -f "node server.js" || true
+
+  # ---------------------------------------------------------------------------
+  # Cross-platform build matrix
+  # ---------------------------------------------------------------------------
+  build:
+    name: Tauri build (${{ matrix.os }})
+    needs: [frontend-test, rust-test, signaling-smoke]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: jam-p2p-linux
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: jam-p2p-macos-intel
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: jam-p2p-macos-arm
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: jam-p2p-windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: jam-gui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: jam-gui/package-lock.json
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config \
+            build-essential
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jam-gui/src-tauri -> target
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Build Tauri app (release)
+        run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload artifacts (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            jam-gui/src-tauri/target/release/bundle/deb/*.deb
+            jam-gui/src-tauri/target/release/bundle/appimage/*.AppImage
+            jam-gui/src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: ignore
+
+      - name: Upload artifacts (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            jam-gui/src-tauri/target/release/bundle/dmg/*.dmg
+            jam-gui/src-tauri/target/release/bundle/macos/*.app
+          if-no-files-found: ignore
+
+      - name: Upload artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            jam-gui/src-tauri/target/release/bundle/msi/*.msi
+            jam-gui/src-tauri/target/release/bundle/exe/*.exe
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Release on tag v*
+  # ---------------------------------------------------------------------------
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

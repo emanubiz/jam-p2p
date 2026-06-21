@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use crate::messages::AppCommand;
 
 pub struct AppState {
-    pub tx: Mutex<mpsc::UnboundedSender<AppCommand>>,
+    pub tx: Mutex<mpsc::Sender<AppCommand>>,
     pub connected: Arc<AtomicBool>,
 }
 
@@ -15,7 +15,7 @@ pub struct BackendState {
 }
 
 pub fn init_state(
-    tx: mpsc::UnboundedSender<AppCommand>,
+    tx: mpsc::Sender<AppCommand>,
 ) -> (AppState, BackendState) {
     let connected = Arc::new(AtomicBool::new(false));
     (
@@ -46,6 +46,7 @@ pub async fn join_room(
             server,
             res_tx,
         })
+        .await
         .map_err(|e| e.to_string())?;
     }
     res_rx
@@ -64,6 +65,7 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
     {
         let tx = state.tx.lock().map_err(|e| e.to_string())?;
         tx.send(AppCommand::Leave { res_tx })
+            .await
             .map_err(|e| e.to_string())?;
     }
     let result = res_rx
@@ -77,25 +79,28 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_volume(state: State<AppState>, peer_id: String, vol: f32) -> Result<(), String> {
+pub async fn set_volume(state: State<'_, AppState>, peer_id: String, vol: f32) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AppCommand::SetVolume { peer_id, vol })
+        .await
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn set_opus_bitrate(state: State<AppState>, bitrate: i32) -> Result<(), String> {
+pub async fn set_opus_bitrate(state: State<'_, AppState>, bitrate: i32) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AppCommand::SetOpusBitrate { bitrate })
+        .await
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn set_muted(state: State<AppState>, muted: bool) -> Result<(), String> {
+pub async fn set_muted(state: State<'_, AppState>, muted: bool) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AppCommand::SetMute { muted })
+        .await
         .map_err(|e| e.to_string())?;
     Ok(())
 }

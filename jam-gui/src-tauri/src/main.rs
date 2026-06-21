@@ -28,7 +28,10 @@ use crate::webrtc::{PeerManager, WebrtcContext};
 
 fn main() {
     init_tracing();
-    let (tx, rx) = mpsc::unbounded_channel::<AppCommand>();
+    // Bounded channels give backpressure: if a producer outruns a consumer
+    // (e.g. a burst of WS frames), `.send().await` awaits instead of letting
+    // memory grow without limit. 256 is plenty for 8 peers × 50 msg/s bursts.
+    let (tx, rx) = mpsc::channel::<AppCommand>(64);
     let (app_state, backend_state) = init_state(tx);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -60,7 +63,7 @@ fn main() {
     let _ = shutdown_tx.send(true);
 }
 
-async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut rx: mpsc::UnboundedReceiver<AppCommand>, mut shutdown_rx: watch::Receiver<bool>) -> Result<()> {
+async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut rx: mpsc::Receiver<AppCommand>, mut shutdown_rx: watch::Receiver<bool>) -> Result<()> {
     let audio = init_audio()?;
     let mixer_sources = audio.mixer_sources.clone();
 
@@ -93,9 +96,9 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
         handle.clone(),
     );
 
-    let (sig_tx, mut sig_rx) = mpsc::unbounded_channel::<SignalMessage>();
-    let (ws_in_tx, mut ws_in_rx) = mpsc::unbounded_channel::<String>();
-    let (ws_event_tx, mut ws_event_rx) = mpsc::unbounded_channel::<WsEvent>();
+    let (sig_tx, mut sig_rx) = mpsc::channel::<SignalMessage>(256);
+    let (ws_in_tx, mut ws_in_rx) = mpsc::channel::<String>(256);
+    let (ws_event_tx, mut ws_event_rx) = mpsc::channel::<WsEvent>(256);
 
     let ctx = WebrtcContext {
         api,

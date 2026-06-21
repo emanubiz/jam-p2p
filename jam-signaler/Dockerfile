@@ -2,15 +2,14 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copia SOLO la dist (il bundle già compilato)
+# Copy ONLY the prebuilt bundle (compiled upstream of the image build).
 COPY dist/index.js ./
 
-# Esponi la porta
+# Expose the signaling port (HTTP + WebSocket).
 EXPOSE 8080
 
-# Variabili d'ambiente
+# Environment defaults — overridable at runtime via `docker run -e ...` or compose.
 ENV PORT=8080
 ENV LOG_LEVEL=info
 
-# Avvia il server
 CMD ["node", "index.js"]

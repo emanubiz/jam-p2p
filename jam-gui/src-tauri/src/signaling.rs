@@ -16,9 +16,13 @@ pub struct SignalingClient {
             tokio_tungstenite::tungstenite::Message,
         >,
     >,
-    pub ws_in_tx: mpsc::UnboundedSender<String>,
-    pub sig_tx: mpsc::UnboundedSender<SignalMessage>,
-    pub ws_event_tx: mpsc::UnboundedSender<WsEvent>,
+    // Bounded senders apply backpressure: if the main event loop falls behind
+    // (e.g. blocked on a slow WebRTC callback), sends block instead of letting
+    // the channel grow unbounded. The reader task uses `send().await` and the
+    // disconnect retry path stays compatible via `let _ = ...`.
+    pub ws_in_tx: mpsc::Sender<String>,
+    pub sig_tx: mpsc::Sender<SignalMessage>,
+    pub ws_event_tx: mpsc::Sender<WsEvent>,
     pub last_join: Option<(String, String, String)>,
     pub reconnect_delay: u64,
     shutdown_rx: watch::Receiver<bool>,
@@ -26,9 +30,9 @@ pub struct SignalingClient {
 
 impl SignalingClient {
     pub fn new(
-        ws_in_tx: mpsc::UnboundedSender<String>,
-        sig_tx: mpsc::UnboundedSender<SignalMessage>,
-        ws_event_tx: mpsc::UnboundedSender<WsEvent>,
+        ws_in_tx: mpsc::Sender<String>,
+        sig_tx: mpsc::Sender<SignalMessage>,
+        ws_event_tx: mpsc::Sender<WsEvent>,
         shutdown_rx: watch::Receiver<bool>,
     ) -> Self {
         SignalingClient {
@@ -71,21 +75,27 @@ impl SignalingClient {
                             msg = read.next() => {
                                 match msg {
                                     Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => {
-                                        let _ = ws_in_tx.send(t);
+                                        // Bounded sender: `.send().await` blocks if the
+                                        // backend loop is behind. We swallow errors because
+                                        // the channel closes only when the backend is gone,
+                                        // which means the app is shutting down anyway.
+                                        if ws_in_tx.send(t).await.is_err() {
+                                            break;
+                                        }
                                     }
                                     _ => break,
                                 }
                             }
                         }
                     }
-                    let _ = ws_event_tx.send(WsEvent::Disconnected);
+                    let _ = ws_event_tx.send(WsEvent::Disconnected).await;
                 });
 
                 self.ws_sender = Some(write);
                 let _ = self.sig_tx.send(SignalMessage::Join {
                     room: room.to_string(),
                     name: name.to_string(),
-                });
+                }).await;
                 let _ = res_tx.send(Ok(()));
             }
             Err(e) => {
@@ -96,7 +106,7 @@ impl SignalingClient {
                 // Disconnected — never ran. Re-emit it here so the exponential
                 // backoff loop keeps retrying instead of giving up after one try.
                 if self.last_join.is_some() {
-                    let _ = self.ws_event_tx.send(WsEvent::Disconnected);
+                    let _ = self.ws_event_tx.send(WsEvent::Disconnected).await;
                 }
             }
         }

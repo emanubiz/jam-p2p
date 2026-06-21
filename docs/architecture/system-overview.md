@@ -10,7 +10,7 @@ jam-p2p is a real-time P2P audio jam application that enables musicians to colla
 ┌─────────────────────────────────────────────────────────────────┐
 │                     jam-gui (Frontend UI)                        │
 │  React + Vite + Tauri v2                                         │
-│  - App.tsx: Compositor for 7 extracted components               │
+│  - App.tsx: Compositor for 6 extracted components + 1 custom hook               │
 │  - useTauriEvents(): Custom hook for all Tauri event listeners  │
 │  - ConnectionForm, PeerCard, VuMeter, SettingsPanel, etc.       │
 │  - Tauri Commands → Rust backend (join, leave, volume, mute)    │
@@ -75,7 +75,7 @@ jam-p2p is a real-time P2P audio jam application that enables musicians to colla
 
 ```
 App.tsx (compositor)
-├── hooks/useTauriEvents.ts    — Manages 5 Tauri event listeners, returns { peers, localLevel, disconnected, ... }
+├── hooks/useTauriEvents.ts    — Manages 7 Tauri event listeners, returns { peers, localLevel, disconnected, reconnected, serverError, ... }
 ├── components/ConnectionForm.tsx — Server + room inputs, connect button (React.memo)
 ├── components/StatusBar.tsx      — Status dot + text + quality badge (React.memo)
 ├── components/SettingsPanel.tsx  — Bitrate slider, collapsible (React.memo)
@@ -113,9 +113,10 @@ The WS reader task also respects the shutdown signal via its own `tokio::select!
 | Direction | Type | Payload |
 |---|---|---|
 | Server → Client | `Welcome` | `{ uuid, iceServers }` |
-| Server → Client | `PeerList` | `{ peers: string[] }` |
-| Server → Client | `NewPeer` | `{ uuid }` |
+| Server → Client | `PeerList` | `{ peers: [{ uuid, name }] }` |
+| Server → Client | `NewPeer` | `{ uuid, name }` |
 | Server → Client | `PeerLeft` | `{ uuid }` |
+| Server → Client | `Error` | `{ message }` (room full / limit reached) |
 | Client → Server | `Join` | `{ room, name }` |
 | Client → Server | `Leave` | — |
 | Bidirectional | `Offer` | `{ target/from, sdp }` |
@@ -135,7 +136,7 @@ answer would ever be produced.
 |---|---|---|
 | `/health` | GET | `{ status, rooms, peers, uptime }` |
 | `/ice-servers` | GET | `{ iceServers: [...] }` |
-| `/room/:name` | GET | `{ room, peerCount, peers: [...] }` |
+| `/room/:name` | GET | `{ room, peerCount }` (no per-peer UUIDs — privacy) |
 
 ## Audio Pipeline
 
@@ -173,8 +174,8 @@ PCM samples ──► RMS ──► 20 * log10(RMS) ──► normalize [-60dB, 
 
 | Command | Params | Returns | Notes |
 |---|---|---|---|
-| `join_room` | `{ room, name, server }` | `Result<(), String>` | Guard: already connected → error |
-| `leave_room` | — | `Result<(), String>` | Guard: not connected → error |
+| `join_room` | `{ room, name, server }` | `Result<(), String>` | Guard: already connected → "Already connected to a room. Leave first." |
+| `leave_room` | — | `Result<(), String>` | Idempotent — safe to call during auto-reconnect; force-clears `connected` flag |
 | `set_volume` | `{ peer_id, vol }` | `Result<(), String>` | |
 | `set_opus_bitrate` | `{ bitrate }` | `Result<(), String>` | Value in bits/s (UI converts kbps → bits/s); clamped 8–256 kbps in the encoder |
 | `set_muted` | `{ muted }` | `Result<(), String>` | Save/restore volumes |
@@ -183,11 +184,13 @@ PCM samples ──► RMS ──► 20 * log10(RMS) ──► normalize [-60dB, 
 
 | Event | Payload | When |
 |---|---|---|
-| `peer-joined` | `string` (peer ID) | PC state → Connected |
+| `peer-joined` | `{ id: string, name: string }` | PC state → Connected |
 | `peer-left` | `string` (peer ID) | PC state → Disconnected OR PeerLeft signal |
 | `peer-level` | `{ id: string, level: number }` | Decoded RTP (EMA smoothed, throttled ~15 Hz) |
 | `local-level` | `{ level: number }` | Encoded frame (EMA smoothed, throttled ~15 Hz) |
-| `disconnected` | — | WebSocket connection dropped |
+| `connected` | — | (Re)connected to signaling server (after `Welcome`); flips `connected` flag back to true |
+| `disconnected` | — | WebSocket connection dropped; resets `connected` flag so the next `join_room` is accepted |
+| `server-error` | `string` | Server-side error (room full / limit reached) — shown in the UI error box |
 
 ## Technical Decisions
 
@@ -259,7 +262,9 @@ Full mesh becomes impractical above ~6–8 peers due to O(N²) bandwidth, CPU, a
 
 ---
 
-**Last Updated**: 2026-06-18
-**Status**: Backend and frontend complete, ready for E2E testing and production hardening
+**Last Updated**: 2026-06-21
+**Status**: CI/CD active (`.github/workflows/build.yml`), documentation aligned with code (peer-joined payload, 7 Tauri event listeners, 30+6 tests, /room/:name peerCount-only), `mpsc::channel(N)` bounded channels pending (see ROADMAP).
 
 > **2026-06-18 — critical-fix pass:** forced Opus-compatible sample rate (no more silent no-audio on 44.1 kHz devices), bitrate slider kbps→bits/s conversion + encoder clamp, single-offerer mesh (glare fix), reconnect loop that survives failed retries, and a real-time-safe (`try_lock`) mixer. Remaining audit items (signaling auth, WSS, per-room peer caps, room enumeration via CORS) are tracked in `ROADMAP.md`.
+
+> **2026-06-21 — CI/CD + alignment pass:** added `.github/workflows/build.yml` (vitest + cargo test + signaling smoke + cross-platform Tauri build matrix + GitHub Release on tag), aligned README/ROADMAP/system-overview with code reality (peer-joined payload object, 7 Tauri event listeners including `connected`/`reconnected`/`server-error`, 30 Rust + 6 frontend tests, /room/:name returns `{room, peerCount}` only).

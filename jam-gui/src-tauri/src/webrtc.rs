@@ -19,7 +19,7 @@ pub struct WebrtcContext {
     pub api: Arc<::webrtc::api::API>,
     pub local_track: Arc<TrackLocalStaticRTP>,
     pub mixer: Arc<Mutex<MixerMap>>,
-    pub sig_tx: mpsc::UnboundedSender<SignalMessage>,
+    pub sig_tx: mpsc::Sender<SignalMessage>,
     pub handle: tauri::AppHandle,
     pub sample_rate: u32,
     pub samples_per_frame: usize,
@@ -104,7 +104,7 @@ impl PeerManager {
                         target: pid.clone(),
                         sdp,
                         from: None,
-                    });
+                    }).await;
                     self.peers.insert(pid, pc);
                 }
             }
@@ -144,7 +144,7 @@ impl PeerManager {
                         target: pid.clone(),
                         sdp,
                         from: None,
-                    });
+                    }).await;
                     self.peers.insert(pid, pc);
                 }
             }
@@ -282,7 +282,7 @@ impl PeerManager {
                                     target: p,
                                     candidate,
                                     from: None,
-                                });
+                                }).await;
                             }
                             Err(e) => {
                                 tracing::warn!("Failed to serialize ICE candidate for peer {}: {:?}", p, e);

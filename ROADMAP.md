@@ -15,7 +15,7 @@
 | Rust backend | ✅ Complete | cpal audio (forced Opus sample rate), Opus codec, WebRTC single-offerer mesh, RT-safe mixer, fault-tolerant reconnect, mute/save-restore, graceful shutdown, VU throttle, bitrate clamp+dedup, ICE servers sourced from Welcome, 30 unit tests (23 audio + 7 serde wire protocol) |
 | Frontend UI | ✅ Refactored | Component-based architecture (8 components + shared `AppStatus` type + hook), volume controls, VU meters, settings panel, keyboard shortcuts, display name input, auto-reconnect with Cancel, server-error surfacing, 6 rendering tests |
 | Mesh signaling tests | ✅ Verified | 3-peer (6 conns), 5-peer (20 conns) |
-| CI/CD pipeline | ✅ Configured | Linux, macOS (Intel + ARM), Windows builds, GitHub Release on tag |
+| CI/CD pipeline | ✅ Active | `.github/workflows/build.yml`: vitest + cargo test + signaling smoke + Linux/macOS(Intel+ARM)/Windows build matrix + GitHub Release on tag `v*` |
 | ADR documentation | ✅ Written | ADR-001: WsEvent reconnect mechanism |
 | Audio streaming E2E | ⏳ To test | Backend code complete, needs manual verification |
 | Local build (Rust) | ⏳ System deps | GTK3 deps needed locally; CI builds successfully |
@@ -162,4 +162,4 @@
 
 ---
 
-**Last updated**: 2026-06-18
+**Last updated**: 2026-06-21

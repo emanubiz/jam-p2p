@@ -193,8 +193,8 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 | Endpoint | Method | Description |
 |---|---|---|
 | `/health` | GET | Server health (room count, peer count, uptime) |
-| `/ice-servers` | GET | STUN/TURN configuration |
-| `/room/:name` | GET | Room info (peer count, peer IDs) |
+| `/ice-servers` | GET | STUN/TURN configuration (always emitted as `urls: []`) |
+| `/room/:name` | GET | Room info (peer count only — peer UUIDs are not enumerable cross-origin for privacy) |
 
 ### Security
 
@@ -212,8 +212,8 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 
 | Command | Params | Returns | Description |
 |---|---|---|---|
-| `join_room` | `{ room, name, server }` | `Result<(), String>` | Join a room (guards: not already connected) |
-| `leave_room` | — | `Result<(), String>` | Leave current room (guards: must be connected) |
+| `join_room` | `{ room, name, server }` | `Result<(), String>` | Join a room (fails with "Already connected" if a session is already live; auto-reconnect does not block) |
+| `leave_room` | — | `Result<(), String>` | Leave current room (idempotent — safe to call during auto-reconnect) |
 | `set_volume` | `{ peer_id, vol }` | `Result<(), String>` | Set per-peer volume (0.0–1.0) |
 | `set_opus_bitrate` | `{ bitrate }` | `Result<(), String>` | Set encoder bitrate (16000–192000 bps) |
 | `set_muted` | `{ muted }` | `Result<(), String>` | Mute/unmute with volume save/restore |
@@ -222,11 +222,13 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 
 | Event | Payload | Description |
 |---|---|---|
-| `peer-joined` | `string` | New peer connected |
+| `peer-joined` | `{ id: string, name: string }` | New peer connected (name from server `NewPeer`/`PeerList`) |
 | `peer-left` | `string` | Peer disconnected |
-| `peer-level` | `{ id, level }` | Peer audio level (0.0–1.0, EMA smoothed) |
-| `local-level` | `{ level }` | Local mic level (0.0–1.0, EMA smoothed) |
-| `disconnected` | — | WebSocket connection dropped |
+| `peer-level` | `{ id: string, level: number }` | Peer audio level (0.0–1.0, EMA smoothed, throttled ~15 Hz) |
+| `local-level` | `{ level: number }` | Local mic level (0.0–1.0, EMA smoothed, throttled ~15 Hz) |
+| `connected` | — | (Re)connected to signaling server (after `Welcome`); also clears `reconnecting` UI |
+| `disconnected` | — | WebSocket connection dropped; UI shows reconnecting panel with Cancel button |
+| `server-error` | `string` | Server-side error message (e.g. "Room is full", "Server room limit reached") |
 
 ### Key Design Decisions
 
@@ -263,8 +265,8 @@ App.tsx
 ├── LocalMicCard       — Local mic VU meter
 ├── PeerCard[]         — Per-peer: name, volume slider, VU meter
 │   └── VuMeter        — 20-bar LED-style level display (20 bars, green/blue)
-└── hooks/useTauriEvents() — Hook managing 5 Tauri event listeners
-    └── Returns { peers, localLevel, disconnected, updatePeerVolume, ... }
+└── hooks/useTauriEvents() — Hook managing 7 Tauri event listeners
+    └── Returns { peers, localLevel, disconnected, reconnected, serverError, resetPeers, updatePeerVolume, ... }
 ```
 
 All peer-facing components use `React.memo` to minimize re-renders.
@@ -293,9 +295,9 @@ cd jam-gui/src-tauri && cargo test
 
 ### Test Coverage
 
-- **Rust**: 23 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN safety, clipping, extreme values, convergence) and Opus sample-rate selection (`pick_common_opus_rate`)
-- **Frontend**: 5 rendering tests (logo, connection form, inputs, component structure)
-- **Signaling**: Integration test scripts in `docs/testing/scripts/`
+- **Rust**: 30 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN/Inf safety, clipping, extreme values, convergence) and Opus sample-rate selection (`pick_common_opus_rate`), plus 7 serde wire-protocol round-trip tests
+- **Frontend**: 6 rendering tests (logo, connection form, inputs, component structure) + display-name label
+- **Signaling**: Jest unit tests + integration test scripts in `docs/testing/scripts/`
 
 ---
 
@@ -341,4 +343,16 @@ ISC
 
 ---
 
-**Last updated**: 2026-06-16
+**Last updated**: 2026-06-21
+
+## CI/CD
+
+GitHub Actions pipeline (`.github/workflows/build.yml`) runs on every push and pull request to `main`:
+
+- **Frontend test job**: Vitest + ESLint + TypeScript typecheck on `ubuntu-latest`
+- **Rust test job**: `cargo test` (30 unit tests), `cargo fmt --check`, `cargo clippy -D warnings`, `cargo audit`
+- **Signaling smoke job**: Jest unit tests + 3-peer mesh signaling integration test + HTTP `/health` and `/ice-servers` smoke
+- **Build matrix**: Tauri release build on Linux (`.deb`, `.AppImage`, `.rpm`), macOS Intel + Apple Silicon (`.dmg`), Windows (`.msi`, `.exe`)
+- **Release**: tags matching `v*` produce a GitHub Release with all platform artifacts attached
+
+Trigger a manual run from the Actions tab → "Build & Test" → "Run workflow".
