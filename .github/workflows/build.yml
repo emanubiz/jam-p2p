@@ -23,6 +23,7 @@ jobs:
   frontend-test:
     name: Frontend tests (vitest + lint)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: jam-gui
@@ -47,7 +48,7 @@ jobs:
         run: npm run lint
 
       - name: Vitest
-        run: npm test -- --run --reporter=verbose
+        run: npm test -- --reporter=verbose
 
   # ---------------------------------------------------------------------------
   # Rust unit tests + cargo audit
@@ -55,6 +56,7 @@ jobs:
   rust-test:
     name: Rust unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: jam-gui/src-tauri
@@ -97,10 +99,6 @@ jobs:
           # The audio tests are pure (no device I/O), so an empty ALSA
           # config keeps them deterministic in CI.
           ALSA_CONFIG_PATH: ${{ runner.temp }}/empty-alsa.conf
-        # The encoder thread spawns a cpal stream; without an audio device in
-        # CI we skip the heavyweight integration tests but keep the unit tests
-        # that don't touch hardware.
-        continue-on-error: false
 
       - name: cargo audit
         uses: rustsec/audit-check@v2
@@ -114,6 +112,7 @@ jobs:
   signaling-smoke:
     name: Signaling server smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: jam-signaler
@@ -129,10 +128,10 @@ jobs:
           cache-dependency-path: jam-signaler/package-lock.json
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
 
       - name: Unit tests (jest)
-        run: npm test -- --ci --colors=false
+        run: npm test -- --ci
         continue-on-error: false
 
       - name: Start signaling server
@@ -147,7 +146,7 @@ jobs:
 
       - name: Graceful shutdown test
         run: |
-          node ../docs/testing/scripts/test-graceful-shutdown.js || true
+          node ../docs/testing/scripts/test-graceful-shutdown.js
 
       - name: Health endpoint smoke
         run: |
@@ -164,6 +163,7 @@ jobs:
   build:
     name: Tauri build (${{ matrix.os }})
     needs: [frontend-test, rust-test, signaling-smoke]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
