@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "./hooks/useTauriEvents";
 import ConnectionForm from "./components/ConnectionForm";
@@ -7,6 +7,11 @@ import LocalMicCard from "./components/LocalMicCard";
 import StatusBar from "./components/StatusBar";
 import PeerCard from "./components/PeerCard";
 import "./App.css";
+
+/** Debounce window for per-peer volume updates sent to the backend. The UI
+ *  still updates instantly (optimistic); only the IPC call to the Rust mixer
+ *  is throttled so a slider drag doesn't fire `set_volume` for every pixel. */
+const VOLUME_DEBOUNCE_MS = 50;
 
 function App() {
   const [room, setRoom] = useState("studio1");
@@ -80,9 +85,25 @@ function App() {
     }
   }, [resetPeers]);
 
-  const onVolumeChange = useCallback((peerId: string, v: number) => {
-    updatePeerVolume(peerId, v);
-    invoke("set_volume", { peerId, vol: v }).catch(console.warn);
+  // Optimistic + debounced volume updates. The UI is updated immediately on
+  // every change so the slider feels instant; the actual `set_volume` IPC is
+  // debounced so a single mouse drag of the slider generates one (or a few)
+  // calls instead of dozens. The pending timer is kept in a useMemo so it
+  // survives across renders without resetting.
+  const onVolumeChange = useMemo(() => {
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    return (peerId: string, v: number) => {
+      updatePeerVolume(peerId, v);
+      const existing = timers.get(peerId);
+      if (existing) clearTimeout(existing);
+      timers.set(
+        peerId,
+        setTimeout(() => {
+          timers.delete(peerId);
+          invoke("set_volume", { peerId, vol: v }).catch(console.warn);
+        }, VOLUME_DEBOUNCE_MS)
+      );
+    };
   }, [updatePeerVolume]);
 
   const toggleMute = useCallback(() => {

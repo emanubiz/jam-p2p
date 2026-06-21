@@ -5,7 +5,8 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --colors=false",
+    "test:watch": "jest --watch",
     "start": "node server.js",
     "build": "ncc build server.js -o dist"
   },
@@ -13,10 +14,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "ws": "^8.19.0",
-    "pino": "^8.20.0"
+    "pino": "^8.20.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@vercel/ncc": "^0.38.1"
+    "@vercel/ncc": "^0.38.1",
+    "jest": "^30.4.2"
   }
 }

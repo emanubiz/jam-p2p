@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use bytes::BytesMut;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::{
     traits::{Consumer, Producer, Split},
@@ -192,6 +193,10 @@ pub fn start_encoder_thread(
         let _ = encoder.set_bitrate(Bitrate::Bits(DEFAULT_OPUS_BITRATE));
         let mut pcm_buf = Vec::with_capacity(samples_per_frame);
         let mut out_buf = [0u8; 1024];
+        // Reused packet buffer. `split().freeze()` produces an immutable
+        // `Bytes` view into our pool without an extra copy: avoids the
+        // ~50 alloc/s of `Bytes::copy_from_slice(&out_buf[..len])`.
+        let mut packet_buf = BytesMut::with_capacity(1024);
         let mut seq: u16 = 0;
         let mut timestamp: u32 = 0;
         let mut prev_level = 0.0f32;
@@ -225,6 +230,9 @@ pub fn start_encoder_thread(
                 }
             }
             if let Ok(len) = encoder.encode_float(&pcm_buf, &mut out_buf) {
+                packet_buf.clear();
+                packet_buf.extend_from_slice(&out_buf[..len]);
+                let payload = packet_buf.split().freeze();
                 let _ = track.write_rtp(&webrtc::rtp::packet::Packet {
                     header: webrtc::rtp::header::Header {
                         payload_type: RTP_PAYLOAD_TYPE,
@@ -232,7 +240,7 @@ pub fn start_encoder_thread(
                         timestamp,
                         ..Default::default()
                     },
-                    payload: bytes::Bytes::copy_from_slice(&out_buf[..len]),
+                    payload,
                 });
 
                 let level = compute_audio_level(&pcm_buf, prev_level);
