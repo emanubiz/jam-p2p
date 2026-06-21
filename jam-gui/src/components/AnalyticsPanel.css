@@ -1,0 +1,60 @@
+/* AnalyticsPanel styles — collapsible per-session metrics strip. Mirrors the
+   SettingsPanel open/closed animation and the card palette used elsewhere. */
+
+.analytics-panel {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.3s ease, margin 0.3s ease;
+  margin: 0;
+}
+
+.analytics-panel.open {
+  max-height: 160px;
+  opacity: 1;
+  margin-bottom: 16px;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  background: rgba(139, 92, 246, 0.04);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.analytics-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.analytics-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #ec4899;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.analytics-value.analytics-mono {
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+}
+
+.analytics-value.analytics-warn {
+  color: #fbbf24;
+}
+
+.analytics-label {
+  font-size: 10px;
+  color: #a0a0b0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  text-align: center;
+}

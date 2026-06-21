@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline';",
+      "csp": "default-src 'self'; script-src 'self' https://www.googletagmanager.com; connect-src 'self' ws: wss: https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com; img-src 'self' data: https://www.google-analytics.com; style-src 'self' 'unsafe-inline';",
       "capabilities": []
     }
   },

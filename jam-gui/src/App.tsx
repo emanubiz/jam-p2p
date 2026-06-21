@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "./hooks/useTauriEvents";
+import { useSessionAnalytics } from "./hooks/useSessionAnalytics";
+import { ga } from "./ga";
 import ConnectionForm from "./components/ConnectionForm";
 import SettingsPanel from "./components/SettingsPanel";
+import AnalyticsPanel from "./components/AnalyticsPanel";
 import LocalMicCard from "./components/LocalMicCard";
 import StatusBar from "./components/StatusBar";
 import PeerCard from "./components/PeerCard";
@@ -24,6 +27,7 @@ function App() {
   const [muted, setMuted] = useState(false);
   const [bitrate, setBitrate] = useState(64);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
 
   const {
     peers,
@@ -37,6 +41,16 @@ function App() {
     resetPeers,
     updatePeerVolume,
   } = useTauriEvents();
+
+  // Lightweight, privacy-safe per-session analytics derived purely from the
+  // existing status + peer state (no backend calls, no persistence).
+  const analytics = useSessionAnalytics(status, peers.length);
+
+  // Mirror the live session duration into a ref so `disconnect` can report it
+  // to GA4 without taking `analytics` as a dependency (which would rebuild the
+  // callback — and re-bind the keyboard listener — on every 1 Hz tick).
+  const elapsedSecRef = useRef(0);
+  elapsedSecRef.current = analytics.elapsedSec;
 
   useEffect(() => {
     if (disconnected) {
@@ -61,11 +75,27 @@ function App() {
     }
   }, [serverError, clearServerError]);
 
+  // Report peer-count churn to GA4 (separate from the in-app analytics panel):
+  // a net increase is a peer connecting, a net decrease one leaving.
+  const prevPeerCountRef = useRef(0);
+  useEffect(() => {
+    if (status !== "connected") {
+      prevPeerCountRef.current = peers.length;
+      return;
+    }
+    const curr = peers.length;
+    const prev = prevPeerCountRef.current;
+    if (curr > prev) ga.peerConnected(curr);
+    else if (curr < prev) ga.peerDisconnected(curr);
+    prevPeerCountRef.current = curr;
+  }, [peers.length, status]);
+
   const connect = useCallback(async () => {
     setStatus("joining");
     setError(null);
     try {
       await invoke("join_room", { room, name: name.trim() || "Anonymous", server });
+      ga.roomJoined(room);
       setStatus("connected");
     } catch (err: unknown) {
       setError(String(err));
@@ -76,6 +106,7 @@ function App() {
   const disconnect = useCallback(async () => {
     try {
       await invoke("leave_room");
+      ga.roomLeft(room, elapsedSecRef.current);
       resetPeers();
       setStatus("idle");
       setBitrate(64);
@@ -83,7 +114,7 @@ function App() {
       setError(String(err));
       setStatus("error");
     }
-  }, [resetPeers]);
+  }, [resetPeers, room]);
 
   // Optimistic + debounced volume updates. The UI is updated immediately on
   // every change so the slider feels instant; the actual `set_volume` IPC is
@@ -248,6 +279,13 @@ function App() {
                     {peers.length} {peers.length === 1 ? "PEER" : "PEERS"}
                   </div>
                   <button
+                    className={`settings-toggle ${analyticsOpen ? "open" : ""}`}
+                    onClick={() => setAnalyticsOpen(!analyticsOpen)}
+                    title="Session analytics"
+                  >
+                    📊
+                  </button>
+                  <button
                     className={`settings-toggle ${settingsOpen ? "open" : ""}`}
                     onClick={() => setSettingsOpen(!settingsOpen)}
                     title="Settings"
@@ -256,6 +294,8 @@ function App() {
                   </button>
                 </div>
               </div>
+
+              <AnalyticsPanel analytics={analytics} isOpen={analyticsOpen} />
 
               <SettingsPanel
                 bitrate={bitrate}
