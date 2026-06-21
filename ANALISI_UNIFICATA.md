@@ -1,13 +1,15 @@
-# 📊 ANALISI UNIFICATA — Jam P2P
+# 📊 ANALISI — Jam P2P (documento unico e definitivo)
 
-> **Fusione e verifica diretta di:** `ANALISI_OPUS.md` + `ANALISI_COMPOSER.md` +
-> `ANALISI_MINIMAX.md` + `COMPENDIO.md`, **ri-eseguita sul codice reale** e
-> integrata con l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e con la
-> feature **analytics** non prevista dal piano originale.
+> Analisi consolidata del progetto, verificata direttamente sul codice reale.
+> Incorpora il lavoro di tre analisi indipendenti (`ANALISI_OPUS.md`,
+> `ANALISI_COMPOSER.md`, `ANALISI_MINIMAX.md`) e del compendio (`COMPENDIO.md`),
+> ormai cancellati perché interamente assorbiti da questo documento.
+> Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
+> **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-21 · **HEAD analizzato:** `265edcd` (+ working tree)
-> **GitNexus:** 819 simboli, 1130 relazioni, 13 execution flow
-> **Test eseguiti durante l'analisi:** frontend **24/24** Vitest · signaling **43/43** Jest · `tsc --noEmit` OK · `eslint` OK
+> **Data:** 2026-06-21 · **HEAD:** `main` (working tree clean)
+> **GitNexus:** 862 simboli, 1201 relazioni, 22 cluster, 17 execution flow
+> **Test eseguiti:** frontend **24/24** Vitest · signaling **43/43** Jest · `tsc --noEmit` OK · `eslint` OK
 
 ---
 
