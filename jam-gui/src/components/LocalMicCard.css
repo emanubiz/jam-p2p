@@ -1,0 +1,38 @@
+/* LocalMicCard styles — local microphone VU display. */
+
+.local-mic-card {
+  background: rgba(139, 92, 246, 0.04);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.local-level-meter {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+}
+
+.local-level-bar {
+  flex: 1;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  transition: background 0.05s linear;
+  opacity: 0.3;
+}
+
+.local-level-bar.blue-low { background: #3b82f6; opacity: 1; }
+.local-level-bar.blue-mid { background: #60a5fa; opacity: 1; }
+.local-level-bar.blue-high { background: #93c5fd; opacity: 1; }
+
+.local-level-label {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #a0a0b0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}

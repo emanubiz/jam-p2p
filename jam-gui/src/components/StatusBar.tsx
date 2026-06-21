@@ -1,4 +1,5 @@
 import React from "react";
+import "./StatusBar.css";
 
 interface StatusBarProps {
   status: "idle" | "joining" | "connected" | "reconnecting" | "error";

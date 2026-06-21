@@ -1,0 +1,32 @@
+/* VuMeter styles — 20-bar LED-style level meter, green/yellow/red. */
+
+.level-meter {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+}
+
+.level-bar {
+  flex: 1;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  transition: background 0.05s linear, opacity 0.1s ease;
+  opacity: 0.3;
+}
+
+.level-bar.green {
+  background: #10b981;
+  opacity: 1;
+}
+
+.level-bar.yellow {
+  background: #f59e0b;
+  opacity: 1;
+}
+
+.level-bar.red {
+  background: #ef4444;
+  opacity: 1;
+}

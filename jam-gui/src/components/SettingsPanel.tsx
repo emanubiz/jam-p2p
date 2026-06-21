@@ -1,4 +1,5 @@
 import React from "react";
+import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
   bitrate: number;

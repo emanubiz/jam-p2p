@@ -1,5 +1,6 @@
 import React from "react";
 import VuMeter from "./VuMeter";
+import "./LocalMicCard.css";
 
 interface LocalMicCardProps {
   level: number;

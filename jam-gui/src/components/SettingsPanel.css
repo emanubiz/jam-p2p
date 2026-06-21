@@ -1,0 +1,85 @@
+/* SettingsPanel styles — collapsible bitrate slider. */
+
+.settings-panel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.settings-panel.open {
+  max-height: 200px;
+  padding: 16px 20px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: #a0a0b0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.settings-value {
+  color: #8b5cf6;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+.bitrate-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bitrate-range-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  min-width: 24px;
+  text-align: center;
+}
+
+.bitrate-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.bitrate-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.bitrate-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.bitrate-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}

@@ -1,6 +1,7 @@
 import React from "react";
 import VuMeter from "./VuMeter";
 import { Peer } from "../types";
+import "./PeerCard.css";
 
 interface PeerCardProps {
   peer: Peer;

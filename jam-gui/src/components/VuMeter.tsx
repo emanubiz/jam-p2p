@@ -1,4 +1,5 @@
 import React from "react";
+import "./VuMeter.css";
 
 const BAR_COUNT = 20;
 const BARS = Array.from({ length: BAR_COUNT }, (_, i) => i);
