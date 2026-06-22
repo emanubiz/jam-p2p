@@ -7,11 +7,11 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 2) · **HEAD:** `main`
-> **GitNexus:** 862 simboli, 1201 relazioni, 22 cluster, 17 execution flow
-> **Test eseguiti (rev. 2, dopo riparazione build):** frontend **25/25** Vitest ·
-> signaling **63/63** Jest (43 unit + 10 integrazione in-process) · Rust **35/35**
-> `cargo test` · `cargo clippy -D warnings` OK · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
+> **Data:** 2026-06-22 (rev. 3) · **HEAD:** `8c48eb0`
+> **GitNexus (reindex rev.3):** 778 nodi, 1221 archi, 26 cluster, 23 execution flow
+> **Test eseguiti (rev. 3, dopo sessione hardening):** frontend **25/25** Vitest ·
+> signaling **63/63** Jest (53 unit + 10 integrazione in-process) · Rust **35/35**
+> `cargo test` · `cargo clippy -D warnings -A pedantic` 0 warning · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
 
 ---
 
@@ -58,24 +58,26 @@ commit `9cbe76a`, **prima** che il piano d'azione fosse eseguito. Questo documen
 
 ## 1. VERDETTO UNIFICATO — prima vs ora
 
-| Dimensione | Compendio (9cbe76a) | **Ora (265edcd + fix)** | Δ |
-|---|---|---|---|
-| Architettura | 8.0/10 | **8.0/10** | = |
-| Code Quality | 7.8/10 | **8.5/10** | ▲ dead deps rimosse, modularizzazione, RT-safety reale |
-| Documentazione | 7.7/10 | **9.0/10** | ▲ disallineamenti chiusi |
-| Allineamento doc↔code | 7.0/10 | **9.0/10** | ▲ era il gap #1, ora risolto |
-| Sicurezza | 6.5/10 | **7.5/10** | ▲ WSS-ready, room auth HMAC, TURN REST dinamico |
-| Ottimizzazione | 7.7/10 | **8.0/10** | ▲ parking_lot + BytesMut + debounce |
-| Build Rust | (non testata) | **OK (rev.2)** | era **rotta** su `main`; ripristinata in rev.2 |
-| Tooling / CI | — | **6.5/10** | rev.1 la dava 8.0 sostenendo "CI reale"; era **rossa sempre**. Verde dalla rev.2 |
-| **Maturità complessiva** | **7.5/10** | **~7.6/10** | la rev.1 (8.2) sovrastimava: codice non compilante + CI rotta |
+| Dimensione | Compendio (9cbe76a) | rev.2 (a9dd5bc) | **Ora (8c48eb0)** | Δ |
+|---|---|---|---|---|
+| Architettura | 8.0/10 | 8.0/10 | **8.0/10** | = |
+| Code Quality | 7.8/10 | 8.5/10 | **8.7/10** | ▲ jitter buffer e decoupling encoder ben fatti, idiomatici |
+| Documentazione | 7.7/10 | 9.0/10 | **9.0/10** | = disallineamenti chiusi |
+| Allineamento doc↔code | 7.0/10 | 9.0/10 | **9.0/10** | = |
+| Sicurezza | 6.5/10 | 7.5/10 | **8.0/10** | ▲ room auth HMAC e TURN REST ora **implementati e unit-testati**, non solo "ready" |
+| Ottimizzazione | 7.7/10 | 8.0/10 | **8.5/10** | ▲ encoder→RTP via mpsc (niente più `block_on` per-frame) + jitter buffer adattivo |
+| Build Rust | (non testata) | OK | **OK** | verde, ri-verificata in rev.3 |
+| Tooling / CI | — | 6.5/10 | **7.0/10** | verde su tutti i job non-hardware; manca branch protection |
+| Test (Rust / FE / signaler) | — | 30 / 25 / 53 | **35 / 25 / 63** | ▲ +5 jitter, +10 auth/turn/validation |
+| **Maturità complessiva** | **7.5/10** | ~7.6/10 | **~8.0/10** | ▲ P1+P2 chiusi; resta solo l'E2E audio reale |
 
-**Verdetto aggiornato (rev. 2):** il progetto **ora** compila, ha la CI verde e l'audio
-*può* finalmente fluire (il bug del future RTP droppato è risolto). Ma proprio per
-questo il rischio #1 resta, e anzi è più acuto: **l'E2E audio non è mai stato eseguito**,
-e fino alla rev.2 non avrebbe potuto funzionare comunque. Restano poi l'hardening di
-produzione (WSS/auth/TURN proprio) e la qualità audio (jitter buffer). Vedi §9 per cosa
-manca e *come* implementarlo.
+**Verdetto aggiornato (rev. 3):** dalla rev.2 un secondo intervento ha chiuso **P1**
+(WSS/auth/TURN) e **P2** (jitter buffer + getStats), più la mitigazione stutter di P0
+(encoder→RTP disaccoppiato). Ho riverificato **compilando ed eseguendo** (vedi §2-ter):
+build verde, clippy 0 warning, 35 test Rust, 63 signaler, 25 frontend, GitNexus reindex OK.
+Il codice è solido e ben strutturato. **Resta un solo blocco reale: l'E2E audio su hardware
+non è ancora stato eseguito** — tutto il resto è verificabile a tavolino, questo no. Finché
+non passa, le build di Phase 8 vanno trattate come "audio non confermato". Vedi §9.
 
 ---
 
@@ -154,6 +156,31 @@ typecheck/lint) su tutti i job non-hardware.
 > **Conseguenza per la qualità:** prima di rev.2 l'audio **non poteva** funzionare
 > (B3). Quindi l'E2E audio "mai eseguito" non era solo una verifica mancante: avrebbe
 > fallito. Ora è il primo passo da fare — vedi §9 P0.
+
+---
+
+## 2-ter. REVIEW SESSIONE HARDENING (rev. 3, 2026-06-22)
+
+Tre commit successivi alla rev.2 (`54ee603`, `ae2985d`, `8c48eb0`) hanno implementato
+P0-mitigazione + P1 + P2. **Riverificati compilando ed eseguendo**, non leggendo:
+`cargo fmt --check` OK · `cargo clippy -D warnings -A pedantic` 0 warning · `cargo test`
+**35/35** · frontend `tsc`/`eslint` puliti · `vitest` **25/25** · signaler `jest` **63/63** ·
+GitNexus reindex OK (778 nodi / 1221 archi / 26 cluster / 23 flussi).
+
+| Area | Cosa è stato fatto | Giudizio review |
+|---|---|---|
+| Encoder→RTP (B3 follow-up) | Thread encoder fa `blocking_send` su `mpsc(32)`; un `tokio::spawn` dedicato fa `write_rtp().await`. Niente più `block_on` per-frame. | ✅ Corretto. Disaccoppia encode da invio; backpressure a 32 slot ≈640 ms. Risolve il rischio stutter di P0 a livello di design. |
+| Jitter buffer (`jitter_buffer.rs`) | `AdaptiveJitterBuffer`: stima jitter RFC 3550 (α=1/16) da timestamp RTP, watermark dinamico `min_target..max_target`, fallback anti-starvation a 150 ms. Innestato in `on_track` (decode→`push_with_rtp_ts`) e drenato sample-by-sample nel callback output. | ✅ Pulito e idiomatico, 5 unit test mirati. Sostituisce il `HeapCons` nel `MixerMap`. |
+| WebRTC stats (`poll_and_emit_stats`) | Poll ogni 2 s in `run_backend` (interval con `MissedTickBehavior::Skip`, solo se ci sono peer); emette `peer-stats` + `session-stats`; `useNetworkStats` + riga in `AnalyticsPanel`. | ✅ Wiring corretto. ⚠️ `RemoteInboundRTP.round_trip_time` in webrtc-rs è spesso `None` → RTT può non popolarsi: da confermare in E2E. |
+| Room auth (`lib/room-auth.js`) | HMAC-SHA256 su `exp\0room`, confronto `timingSafeEqual`, scadenza, opt-in (`ROOM_AUTH_SECRET` vuoto = disabilitato). `GET /room/:name/token`; verifica su `Join`; campo `token` opzionale lato Rust. | ✅ Solido. Default disattivo: non rompe il dev. |
+| TURN dinamico (`lib/turn-credentials.js`) | Credenziali REST coturn-compatibili (`expiry:userId` + HMAC-SHA1), esposte in `/ice-servers` e Welcome; openrelay resta fallback dev. | ✅ Standard, corretto. |
+| Stack produzione | `Caddyfile` (wss→ws 127.0.0.1:8080) + `docker-compose.prod.yml` (signaler+caddy+coturn) + `.env.example`. Client Rust accetta `wss://` (`tokio-tungstenite` + `native-tls`). | ✅ Presente. ⚠️ Mai deployato/integration-testato end-to-end (Caddy+coturn reali). |
+
+**Gap residui individuati in review (non bloccanti, vedi §9):** (a) nessun test E2E che il
+client Rust mandi davvero `token` e si colleghi via `wss://`; (b) jitter buffer validato solo
+in unit, non sotto jitter di rete reale; (c) RTT stats potenzialmente vuoto (sopra);
+(d) `run_backend` ancora monolitico. **Nota processo:** i commit della sessione hardening
+includono `Co-authored-by: Cursor` — i miei commit, su richiesta, non portano coautore.
 
 ---
 
@@ -276,24 +303,37 @@ di Phase 9 in modo completo.
 
 ## 9. COSA MANCA E COME IMPLEMENTARLO
 
-Sintesi prioritizzata. Per ogni voce: *perché serve* e *come* realizzarla in concreto
-in questo codebase.
+Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni voce:
+*perché serve* e *come* realizzarla in concreto in questo codebase.
 
-### 🔴 P0 — Verifica E2E audio (sbloccante, ora possibile)
-- **Perché:** dopo il fix B3 (§2-bis) l'audio *dovrebbe* finalmente fluire, ma non è
-  mai stato confermato su hardware reale. È la prova che l'intera pipeline regge.
-- **Come:** seguire `docs/testing/E2E-AUDIO-PROCEDURE.md` con 2 macchine (o 2 device
-  audio). Verificare in particolare che il fix `rt.block_on(write_rtp)` non introduca
-  stuttering: il `block_on` per-frame (ogni 20 ms) sul thread encoder è accettabile, ma
-  se la rete rallenta `write_rtp` potrebbe bloccare l'encode. Se emergono glitch,
-  passare a un canale `mpsc` encoder→task-async dedicato (l'encoder produce `Bytes`, un
-  task tokio fa `write_rtp().await`), disaccoppiando encode e invio.
-- **Stato (2026-06-22):** prerequisiti automatizzati verificati (suite 107/107, signaling
-  healthy, build OK). Mitigazione stutter **implementata**: encoder→RTP via
-  `tokio::sync::mpsc` + task async dedicato (sostituisce `block_on`). Esito parziale in
+### 🔴 P0 — Verifica E2E audio su hardware (UNICO blocco reale rimasto)
+- **Perché:** è l'unica cosa che non si può verificare a tavolino. Il design ora è corretto
+  (RTP inviato via task async; decode→jitter buffer→mixer), ma nessuno ha ancora sentito
+  audio uscire da due macchine reali. Finché non accade, Phase 8 = "audio non confermato".
+- **Come:** seguire `docs/testing/E2E-AUDIO-PROCEDURE.md` steps 2–9 con 2 macchine (o 2
+  device audio distinti). Da osservare specificamente, ora che il path è cambiato:
+  1. **Niente stutter** — il decoupling mpsc dovrebbe averlo eliminato; confermarlo.
+  2. **Jitter buffer non in starvation costante** — se l'audio "spezzetta", il watermark
+     `target_fill` potrebbe essere troppo aggressivo: loggare `len()`/`target_fill()` o
+     ridurre `min_target` (oggi `samples_per_frame * 2`).
+  3. **RTT popolato** — verificare che `peer-stats.rttMs` non sia sempre `null`; se lo è,
+     `webrtc-rs` non riempie `RemoteInboundRTP.round_trip_time` e va stimato altrimenti
+     (es. da `candidate-pair`), vedi §2-ter.
+- **Stato:** prerequisiti automatizzati verificati (build/clippy/35 test Rust, 63 signaler,
+  25 FE, GitNexus). Mitigazione stutter implementata. Esito in
   `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md` — **playback bidirezionale ancora pending**
-  (richiede 2 peer con hardware audio reale).
-- **Esito atteso:** RTT 60–160 ms, VU bidirezionali, `peers:0` a fine sessione.
+  (richiede operatore umano + 2 device audio; non eseguibile in CI/headless).
+- **Esito atteso:** RTT 60–160 ms, VU bidirezionali, nessun glitch, `peers:0` a fine sessione.
+
+### ✅ P0.5 — Validazione del path di rete sicuro (segue P0, prima del deploy)
+- **Perché:** WSS/auth/TURN sono implementati e unit-testati, ma **mai esercitati end-to-end**
+  contro Caddy+coturn reali (§2-ter gap a/d). Il rischio non è la logica HMAC, è il wiring:
+  il client manda davvero `token`? si collega su `wss://`? coturn accetta le credenziali REST?
+- **Come:** (1) `docker compose -f jam-signaler/docker-compose.prod.yml up` con
+  `ROOM_AUTH_SECRET`/`TURN_SECRET` settati; (2) connettere due client a `wss://<host>` con
+  un token preso da `GET /room/:name/token`; (3) forzare il relay TURN (bloccando l'host-host)
+  e confermare dal log coturn che le credenziali effimere sono accettate. Aggiungere un test
+  d'integrazione signaler: `Join` senza token con `ROOM_AUTH_SECRET` attivo → `Error`.
 
 ### 🟠 P1 — Hardening di rete (produzione) — **implementato 2026-06-22**
 1. **WSS/TLS sul signaling.** *Perché:* oggi SDP/ICE viaggiano in chiaro (MITM in rete
@@ -363,17 +403,20 @@ saldato — ma quel verdetto era costruito su una verifica solo-statica: **il co
 compilava, la CI era rossa e l'audio non poteva essere trasmesso.** Compilare e far
 girare i test ha ribaltato il quadro.
 
-**Dove siamo davvero (rev. 2):** dopo la riparazione (§2-bis) il progetto compila, la CI
-è verde su tutti i job non-hardware, i 30 test Rust girano, e il bug che impediva l'invio
-RTP è risolto. Voto realistico **~7.6/10**: il codice di base è solido e ben strutturato,
-ma la maturità "production" resta condizionata a **una verifica mai fatta** (E2E audio,
-ora finalmente possibile) e all'**hardening di rete** (WSS/auth/TURN). La differenza
-rispetto alla rev.1 non è il codice — è aver smesso di fidarsi della lettura e aver
-premuto "compila".
+**Dove siamo davvero (rev. 3):** dopo la riparazione (§2-bis) e la sessione di hardening
+(§2-ter), il progetto compila, la CI è verde, **P1 (WSS/auth/TURN) e P2 (jitter buffer +
+getStats) sono implementati e unit-testati**, e il path audio è stato disaccoppiato
+(niente più `block_on` per-frame). Voto realistico **~8.0/10**: il codice è solido, ben
+strutturato e ora copre quasi tutto il piano. Quello che separa il progetto dal "production"
+non è più una lista di feature mancanti — è **una sola prova mai fatta**: sentire l'audio
+fluire tra due macchine reali (P0), e poi validare il path sicuro end-to-end contro
+Caddy+coturn (P0.5). Tutto il resto è verificabile a tavolino, ed è verde. Queste due no.
+La lezione della rev.2 resta la bussola: non dire "funziona" finché non l'hai eseguito.
 
 ---
 
-*Rev. 2 (2026-06-22): analisi verificata **compilando ed eseguendo** (cargo
-build/clippy/test, npm test su frontend e signaler, gh run logs della CI), non solo
-leggendo. Rev. 1 (2026-06-21) era basata su lettura statica del codice e va considerata
-superata dove §0.5/§2-bis la contraddicono.*
+*Rev. 3 (2026-06-22): review della sessione hardening (`54ee603`/`ae2985d`/`8c48eb0`),
+riverificata **compilando ed eseguendo** (cargo build/clippy/35 test, vitest 25, jest 63,
+GitNexus reindex). Rev. 2 (2026-06-22): riparazione build+CI verificata eseguendo. Rev. 1
+(2026-06-21) era su lettura statica e va considerata superata dove §0.5/§2-bis/§2-ter la
+contraddicono.*

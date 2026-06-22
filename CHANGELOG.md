@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   events feed RTT, packet loss, and byte counters into `AnalyticsPanel`.
 - **Tests:** Rust **35** (+5 jitter buffer); frontend **25** (+1 analytics panel).
 
+### WebRTC signal handler refactor (2026-06-22)
+
+- Extracted `handle_peer_list`, `handle_incoming_offer`, `handle_incoming_answer`, and
+  `handle_incoming_ice` from `PeerManager::handle_signal` for readability (P3 partial).
+
 ### Network hardening — WSS, room auth, own TURN (2026-06-22)
 
 - **Room authentication (opt-in):** `ROOM_AUTH_SECRET` enables HMAC tokens via
