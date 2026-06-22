@@ -140,7 +140,7 @@ typecheck/lint) su tutti i job non-hardware.
 |---|---|---|---|
 | B1 | `state.rs` (×5 comandi) | guard `parking_lot` (`!Send`) tenuto attraverso `.await` → future Tauri `!Send` → **non compila** | clone del `Sender` fuori dal lock, guard rilasciato prima dell'`await` |
 | B2 | `webrtc.rs:251,279` | `.lock().as_mut()` su `MutexGuard<HashMap>` (il tipo non ha `as_mut`; residuo della migrazione da `Option<HashMap>`) | lock diretto + `insert`/`remove` |
-| B3 | `audio.rs` (encoder) | `let _ = track.write_rtp(...)` — **future droppato senza `await`** → nessun RTP inviato | cattura `tokio::runtime::Handle::current()` + `rt.block_on(write_rtp)` |
+| B3 | `audio.rs` (encoder) | `let _ = track.write_rtp(...)` — **future droppato senza `await`** → nessun RTP inviato | cattura `tokio::runtime::Handle::current()` + `rt.block_on(write_rtp)` → **poi sostituito** con canale `mpsc` encoder→task async `write_rtp().await` (2026-06-22) |
 | B4 | `webrtc.rs:137,191` | `let _ = pc.close()` — future droppato (connessioni mai chiuse pulite) | `.await` (sblocca anche `unused_async` su `close_all`) |
 | B5 | vari | `EncoderHandle` import morto, campi `in_/out_channels` mai letti, const `SILENCE_THRESHOLD_DBFS` morta, `expect` di startup, `manual_range_contains` | rimozioni/`#[allow]` motivato |
 
@@ -287,6 +287,11 @@ in questo codebase.
   se la rete rallenta `write_rtp` potrebbe bloccare l'encode. Se emergono glitch,
   passare a un canale `mpsc` encoder→task-async dedicato (l'encoder produce `Bytes`, un
   task tokio fa `write_rtp().await`), disaccoppiando encode e invio.
+- **Stato (2026-06-22):** prerequisiti automatizzati verificati (suite 107/107, signaling
+  healthy, build OK). Mitigazione stutter **implementata**: encoder→RTP via
+  `tokio::sync::mpsc` + task async dedicato (sostituisce `block_on`). Esito parziale in
+  `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md` — **playback bidirezionale ancora pending**
+  (richiede 2 peer con hardware audio reale).
 - **Esito atteso:** RTT 60–160 ms, VU bidirezionali, `peers:0` a fine sessione.
 
 ### 🟠 P1 — Hardening di rete (produzione)

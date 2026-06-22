@@ -340,7 +340,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining is
 
 **Completed:** Signaling server, Rust backend, WebRTC mesh, UI, CI/CD, graceful shutdown, message validation, VU throttling, component refactoring.
 
-**Next:** E2E audio verification, own TURN server (coturn), WSS signaling, room authentication, SFU topology.
+**Next:** E2E audio verification on real hardware (prerequisites done — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`; encoder→RTP now uses async mpsc), own TURN server (coturn), WSS signaling, room authentication, SFU topology.
 
 ---
 
