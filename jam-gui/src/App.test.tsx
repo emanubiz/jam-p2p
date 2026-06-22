@@ -13,6 +13,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
+// Room token fetch: default to auth-disabled (503) so connect flow stays unchanged.
+vi.stubGlobal(
+  "fetch",
+  vi.fn().mockResolvedValue({ status: 503, ok: false })
+);
+
 // Helper to capture event handlers registered by `useTauriEvents` so the tests
 // can simulate Tauri emitting events without a real backend. Returns both the
 // handlers map AND a `ready` promise that resolves once `setup()` has finished

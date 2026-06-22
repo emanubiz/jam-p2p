@@ -64,7 +64,7 @@ commit `9cbe76a`, **prima** che il piano d'azione fosse eseguito. Questo documen
 | Code Quality | 7.8/10 | **8.5/10** | ▲ dead deps rimosse, modularizzazione, RT-safety reale |
 | Documentazione | 7.7/10 | **9.0/10** | ▲ disallineamenti chiusi |
 | Allineamento doc↔code | 7.0/10 | **9.0/10** | ▲ era il gap #1, ora risolto |
-| Sicurezza | 6.5/10 | **7.0/10** | ▲ rate-limit per-IP; WSS/auth ancora mancanti |
+| Sicurezza | 6.5/10 | **7.5/10** | ▲ WSS-ready, room auth HMAC, TURN REST dinamico |
 | Ottimizzazione | 7.7/10 | **8.0/10** | ▲ parking_lot + BytesMut + debounce |
 | Build Rust | (non testata) | **OK (rev.2)** | era **rotta** su `main`; ripristinata in rev.2 |
 | Tooling / CI | — | **6.5/10** | rev.1 la dava 8.0 sostenendo "CI reale"; era **rossa sempre**. Verde dalla rev.2 |
@@ -223,9 +223,9 @@ leak chiuso (`/room/:name` solo `peerCount`); `from`-spoofing impedito server-si
 Tauri restrittiva; heartbeat 30s.
 
 **Gap aperti (tutti già noti e in ROADMAP Phase 9):**
-- **S1 — No WSS/TLS** sul signaling (MITM su SDP/ICE in rete ostile).
-- **S2 — Nessuna autenticazione stanze** (chi conosce il nome entra).
-- **S4 — TURN openrelay pubblico** con credenziali hardcoded.
+- **S1 — WSS/TLS** — client e stack Docker pronti; richiede deploy con Caddy + dominio.
+- **S2 — Autenticazione stanze** — implementata via `ROOM_AUTH_SECRET` (opt-in).
+- **S4 — TURN openrelay pubblico** — sostituibile con coturn + `TURN_SECRET` (opt-in).
 - **S8 — `ALLOWED_ORIGIN` default `*`** (rischio se dimenticato in prod).
 
 Le **analytics aggiunte non introducono superficie d'attacco**: sono interamente
@@ -294,21 +294,27 @@ in questo codebase.
   (richiede 2 peer con hardware audio reale).
 - **Esito atteso:** RTT 60–160 ms, VU bidirezionali, `peers:0` a fine sessione.
 
-### 🟠 P1 — Hardening di rete (produzione)
+### 🟠 P1 — Hardening di rete (produzione) — **implementato 2026-06-22**
 1. **WSS/TLS sul signaling.** *Perché:* oggi SDP/ICE viaggiano in chiaro (MITM in rete
    ostile). *Come:* non terminare TLS in Node — mettere il signaler dietro un reverse
    proxy (Caddy/nginx) che fa `wss://` → `ws://127.0.0.1:8080`. Il client Rust
    (`signaling.rs`) già usa `tokio-tungstenite`: basta accettare schema `wss` e usare
    `connect_async` con TLS (feature `native-tls`/`rustls`). Configurare `ALLOWED_ORIGIN`.
+   **Stato:** `tokio-tungstenite` con `native-tls`; `jam-signaler/Caddyfile` +
+   `docker-compose.prod.yml` per terminazione TLS. Client accetta `wss://`.
 2. **Autenticazione stanza.** *Perché:* chi conosce il nome entra (S2). *Come:* token
    firmato lato server: l'host crea la stanza e riceve un token HMAC; i `Join` includono
    `token`; `validateMessage`/handler in `server.js` verificano la firma prima di
    aggiungere il peer a `rooms`. In alternativa, password per-stanza con confronto
    costante. Aggiungere campo `token` a `messages.rs` (lato Rust) coerentemente.
+   **Stato:** `ROOM_AUTH_SECRET` + `GET /room/:name/token` + verifica HMAC su Join;
+   frontend fetch automatico; campo `token` opzionale in `messages.rs`/`Join`.
 3. **TURN proprio (coturn).** *Perché:* `openrelay` pubblico con credenziali hardcoded
    (S4) è inaffidabile e non scala. *Come:* deployare `coturn`, generare credenziali
    effimere (TURN REST API: username = `timestamp:userid`, credential = HMAC), ed
    esporle via l'endpoint `/ice-servers` già esistente (oggi statico in `server.js`).
+   **Stato:** `TURN_SECRET` + `TURN_URLS` → credenziali REST dinamiche in Welcome e
+   `/ice-servers`; `docker-compose.prod.yml` include coturn; openrelay resta fallback dev.
 
 ### 🟡 P2 — Qualità audio e osservabilità
 4. **Jitter buffer adattivo** (A1, il vero collo di bottiglia *qualitativo*). *Perché:* i

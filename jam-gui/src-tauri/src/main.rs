@@ -139,8 +139,8 @@ async fn run_backend(
             }
             Some(cmd) = rx.recv() => {
                 match cmd {
-                    AppCommand::Join { server, room, name, res_tx } => {
-                        sig_client.connect(&server, &room, &name, res_tx).await;
+                    AppCommand::Join { server, room, name, token, res_tx } => {
+                        sig_client.connect(&server, &room, &name, token, res_tx).await;
                     }
                     AppCommand::Leave { res_tx } => {
                         sig_client.leave().await;
@@ -222,7 +222,8 @@ async fn run_backend(
                     tokio::time::sleep(delay).await;
                     let (res_tx, _) = tokio::sync::oneshot::channel();
                     if let Some((server, room, name)) = sig_client.last_join.clone() {
-                        sig_client.connect(&server, &room, &name, res_tx).await;
+                        let token = sig_client.last_token.clone();
+                        sig_client.connect(&server, &room, &name, token, res_tx).await;
                     }
                 } else {
                     my_id = None;

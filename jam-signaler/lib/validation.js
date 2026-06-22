@@ -33,10 +33,19 @@ function validateMessage(message) {
 
   switch (message.type) {
     case 'Join':
-      return Boolean(
-        message.data &&
-          isNonEmptyString(message.data.room, MAX_ROOM_NAME_LENGTH) &&
-          isOptionalString(message.data.name, MAX_NAME_LENGTH)
+      if (
+        !message.data ||
+        !isNonEmptyString(message.data.room, MAX_ROOM_NAME_LENGTH) ||
+        !isOptionalString(message.data.name, MAX_NAME_LENGTH)
+      ) {
+        return false;
+      }
+      if (message.data.token === undefined) return true;
+      return (
+        message.data.token &&
+        typeof message.data.token.exp === 'number' &&
+        typeof message.data.token.sig === 'string' &&
+        message.data.token.sig.length > 0
       );
     case 'Leave':
       return true;

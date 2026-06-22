@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "./hooks/useTauriEvents";
 import { useSessionAnalytics } from "./hooks/useSessionAnalytics";
 import { ga } from "./ga";
+import { fetchRoomToken, wsToHttpBase } from "./roomToken";
 import ConnectionForm, { type AppStatus } from "./components/ConnectionForm";
 import SettingsPanel from "./components/SettingsPanel";
 import AnalyticsPanel from "./components/AnalyticsPanel";
@@ -175,10 +176,13 @@ function App() {
     dispatch({ type: "SET_STATUS", status: "joining" });
     dispatch({ type: "SET_ERROR", error: null });
     try {
+      const httpBase = wsToHttpBase(session.server);
+      const token = await fetchRoomToken(httpBase, session.room);
       await invoke("join_room", {
         room: session.room,
         name: session.name.trim() || "Anonymous",
         server: session.server,
+        token: token ?? undefined,
       });
       ga.roomJoined(session.room);
       dispatch({ type: "SET_STATUS", status: "connected" });

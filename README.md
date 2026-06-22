@@ -195,8 +195,9 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 | Endpoint | Method | Description |
 |---|---|---|
 | `/health` | GET | Server health (room count, peer count, uptime) |
-| `/ice-servers` | GET | STUN/TURN configuration (always emitted as `urls: []`) |
+| `/ice-servers` | GET | STUN/TURN configuration (dynamic when `TURN_SECRET` is set) |
 | `/room/:name` | GET | Room info (peer count only — peer UUIDs are not enumerable cross-origin for privacy) |
+| `/room/:name/token` | GET | HMAC room token (requires `ROOM_AUTH_SECRET`; 503 when auth disabled) |
 
 ### Security
 
@@ -204,6 +205,9 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 - Message size limit: 64 KB
 - Message structure validation (type + required fields)
 - Room name validation (non-empty, max 64 chars)
+- Optional room authentication via HMAC tokens (`ROOM_AUTH_SECRET`)
+- Optional own TURN with ephemeral REST credentials (`TURN_SECRET` + coturn)
+- Production TLS: Caddy reverse proxy (`docker-compose.prod.yml`, `Caddyfile`)
 - Graceful shutdown on SIGTERM/SIGINT
 
 ---
@@ -340,7 +344,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining is
 
 **Completed:** Signaling server, Rust backend, WebRTC mesh, UI, CI/CD, graceful shutdown, message validation, VU throttling, component refactoring.
 
-**Next:** E2E audio verification on real hardware (prerequisites done — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`; encoder→RTP now uses async mpsc), own TURN server (coturn), WSS signaling, room authentication, SFU topology.
+**Next:** E2E audio verification on real hardware (prerequisites done — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`), deploy production stack (`docker-compose.prod.yml` with Caddy + coturn + `ROOM_AUTH_SECRET`), adaptive jitter buffer, WebRTC `getStats()` analytics, SFU for large sessions.
 
 ---
 
