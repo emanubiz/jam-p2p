@@ -29,6 +29,26 @@ describe("AnalyticsPanel", () => {
     expect(screen.getByText("1:01:01")).toBeTruthy();
   });
 
+  it("renders network stats when provided", () => {
+    render(
+      <AnalyticsPanel
+        analytics={sample}
+        network={{
+          avgRttMs: 87.4,
+          packetsLost: 2,
+          bytesReceived: 1536,
+          bytesSent: 2048,
+        }}
+        isOpen
+      />
+    );
+    expect(screen.getByText("RTT")).toBeTruthy();
+    expect(screen.getByText("87 ms")).toBeTruthy();
+    expect(screen.getByText("Lost")).toBeTruthy();
+    expect(screen.getByText("In")).toBeTruthy();
+    expect(screen.getByText("Out")).toBeTruthy();
+  });
+
   it("is collapsed (no .open) when isOpen is false", () => {
     const { container } = render(
       <AnalyticsPanel analytics={sample} isOpen={false} />

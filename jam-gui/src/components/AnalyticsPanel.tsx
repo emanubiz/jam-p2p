@@ -1,9 +1,12 @@
 import React from "react";
 import type { SessionAnalytics } from "../hooks/useSessionAnalytics";
+import type { NetworkStats } from "../hooks/useNetworkStats";
+import { formatBytes } from "../hooks/useNetworkStats";
 import "./AnalyticsPanel.css";
 
 interface AnalyticsPanelProps {
   analytics: SessionAnalytics;
+  network?: NetworkStats;
   isOpen: boolean;
 }
 
@@ -19,10 +22,17 @@ function formatDuration(totalSec: number): string {
 
 const AnalyticsPanel = React.memo(function AnalyticsPanel({
   analytics,
+  network,
   isOpen,
 }: AnalyticsPanelProps) {
   const { elapsedSec, participants, peakParticipants, peerJoins, reconnects } =
     analytics;
+  const showNetwork =
+    network &&
+    (network.avgRttMs !== null ||
+      network.packetsLost > 0 ||
+      network.bytesReceived > 0 ||
+      network.bytesSent > 0);
 
   return (
     <div className={`analytics-panel ${isOpen ? "open" : ""}`}>
@@ -56,6 +66,40 @@ const AnalyticsPanel = React.memo(function AnalyticsPanel({
           <div className="analytics-label">Reconnects</div>
         </div>
       </div>
+      {showNetwork && network && (
+        <div className="analytics-grid analytics-grid-network">
+          <div className="analytics-stat">
+            <div className="analytics-value analytics-mono">
+              {network.avgRttMs !== null
+                ? `${Math.round(network.avgRttMs)} ms`
+                : "—"}
+            </div>
+            <div className="analytics-label">RTT</div>
+          </div>
+          <div className="analytics-stat">
+            <div
+              className={`analytics-value ${
+                network.packetsLost > 0 ? "analytics-warn" : ""
+              }`}
+            >
+              {network.packetsLost}
+            </div>
+            <div className="analytics-label">Lost</div>
+          </div>
+          <div className="analytics-stat">
+            <div className="analytics-value analytics-mono">
+              {formatBytes(network.bytesReceived)}
+            </div>
+            <div className="analytics-label">In</div>
+          </div>
+          <div className="analytics-stat">
+            <div className="analytics-value analytics-mono">
+              {formatBytes(network.bytesSent)}
+            </div>
+            <div className="analytics-label">Out</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

@@ -2,6 +2,7 @@
 
 mod audio;
 mod config;
+mod jitter_buffer;
 mod logger;
 mod messages;
 mod signaling;
@@ -19,6 +20,7 @@ use tokio::sync::mpsc;
 
 use crate::audio::{init_audio, start_encoder_thread};
 use crate::config::default_ice_servers;
+use crate::config::STATS_POLL_INTERVAL_MS;
 use crate::logger::init_tracing;
 use crate::messages::{AppCommand, SignalMessage, WsEvent};
 use crate::signaling::SignalingClient;
@@ -124,6 +126,9 @@ async fn run_backend(
     let mut sig_client =
         SignalingClient::new(ws_in_tx, sig_tx.clone(), ws_event_tx, shutdown_rx.clone());
     let mut my_id: Option<String> = None;
+    let mut stats_interval =
+        tokio::time::interval(std::time::Duration::from_millis(STATS_POLL_INTERVAL_MS));
+    stats_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -227,6 +232,11 @@ async fn run_backend(
                     }
                 } else {
                     my_id = None;
+                }
+            }
+            _ = stats_interval.tick() => {
+                if backend.connected.load(Ordering::SeqCst) && !peer_manager.is_empty() {
+                    peer_manager.poll_and_emit_stats(&handle).await;
                 }
             }
         }

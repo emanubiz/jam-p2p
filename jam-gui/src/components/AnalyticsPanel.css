@@ -10,7 +10,7 @@
 }
 
 .analytics-panel.open {
-  max-height: 160px;
+  max-height: 220px;
   opacity: 1;
   margin-bottom: 16px;
 }
@@ -57,4 +57,11 @@
   letter-spacing: 0.08em;
   font-weight: 600;
   text-align: center;
+}
+
+.analytics-grid-network {
+  margin-top: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  background: rgba(59, 130, 246, 0.04);
+  border-color: rgba(59, 130, 246, 0.2);
 }

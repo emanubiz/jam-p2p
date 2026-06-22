@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useRef, useReducer } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "./hooks/useTauriEvents";
 import { useSessionAnalytics } from "./hooks/useSessionAnalytics";
+import { useNetworkStats } from "./hooks/useNetworkStats";
 import { ga } from "./ga";
 import { fetchRoomToken, wsToHttpBase } from "./roomToken";
 import ConnectionForm, { type AppStatus } from "./components/ConnectionForm";
@@ -106,6 +107,9 @@ function App() {
   // Lightweight, privacy-safe per-session analytics derived purely from the
   // existing status + peer state (no backend calls, no persistence).
   const analytics = useSessionAnalytics(status, peers.length);
+  const networkStats = useNetworkStats(
+    status === "connected" || status === "reconnecting"
+  );
 
   // Stable callbacks for form inputs — dispatch is stable from useReducer,
   // so these never cause ConnectionForm (React.memo) to re-render.
@@ -383,7 +387,11 @@ function App() {
                 </div>
               </div>
 
-              <AnalyticsPanel analytics={analytics} isOpen={analyticsOpen} />
+              <AnalyticsPanel
+                analytics={analytics}
+                network={networkStats}
+                isOpen={analyticsOpen}
+              />
 
               <SettingsPanel
                 bitrate={bitrate}

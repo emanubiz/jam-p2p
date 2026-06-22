@@ -47,6 +47,11 @@ Phase 8 builds as audio-trustworthy.
 
 ## Next action
 
-Run steps 2–9 of `E2E-AUDIO-PROCEDURE.md` on two machines (or two local instances
-with distinct mic/speaker paths). If audio flows without stutter, mark PASS and
-update `ANALISI_UNIFICATA.md` §9 P0 as closed.
+**P0 — blocked on human operator:** run steps 2–9 of `E2E-AUDIO-PROCEDURE.md` on two
+machines (or two local instances with distinct mic/speaker paths). The agent cannot
+exercise cpal audio devices in CI or headless environments.
+
+When audio flows without stutter:
+1. Mark PASS in this file
+2. Update `ANALISI_UNIFICATA.md` §9 P0 as closed
+3. Report RTT and any stutter observations
