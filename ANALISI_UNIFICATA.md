@@ -7,9 +7,37 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-21 · **HEAD:** `main` (working tree clean)
+> **Data:** 2026-06-22 (rev. 2) · **HEAD:** `main`
 > **GitNexus:** 862 simboli, 1201 relazioni, 22 cluster, 17 execution flow
-> **Test eseguiti:** frontend **24/24** Vitest · signaling **43/43** Jest · `tsc --noEmit` OK · `eslint` OK
+> **Test eseguiti (rev. 2, dopo riparazione build):** frontend **24/24** Vitest ·
+> signaling **53/53** Jest (43 unit + 10 integrazione in-process) · Rust **30/30**
+> `cargo test` · `cargo clippy -D warnings` OK · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
+
+---
+
+## 0.5 ERRATA — correzione sostanziale alla rev. 1 (2026-06-22)
+
+> ⚠️ **La rev. 1 di questo documento conteneva un errore metodologico grave.**
+> Aveva verificato il progetto **leggendo** il codice ("ri-verifica leggendo il
+> codice, non si fida dei report") ma **non lo aveva mai compilato né eseguito**.
+> Una compilazione di 30 secondi avrebbe ribaltato il verdetto.
+
+**Cosa era realmente lo stato di `main` (smentito dalla rev. 1):**
+
+| Affermazione rev. 1 | Realtà verificata compilando/eseguendo |
+|---|---|
+| "CI reale e completo ✅" (P0.1), Tooling/CI **8.0/10** | La pipeline era **rossa a ogni commit** — non è mai passata una volta |
+| `parking_lot` migration "✅ verificata" | Introduceva errori **`Send`**: i comandi Tauri async tenevano un guard `!Send` attraverso `.await` → **il binario non compilava** (`cargo check` = 14 errori) |
+| "30 test Rust" (copertura "eccellente") | Il codice di test **non compilava** (`as_mut` su `MutexGuard`, partial-move) → i 30 test **non erano mai stati eseguiti** |
+| Pipeline audio "RT-safe, verificata" | **Bug critico**: in `start_encoder_thread` il future di `track.write_rtp` veniva **droppato senza `await`** (`let _ = ...`) → **nessun pacchetto RTP veniva mai trasmesso**. Idem `pc.close()` (×2) |
+
+**Causa radice:** verifica esclusivamente statica (lettura) senza un singolo
+`cargo build`/`cargo clippy`/`cargo test`. Lezione: *un'analisi che non compila il
+codice non è una verifica, è una recensione.*
+
+**Riparazione eseguita in questa sessione (rev. 2)** — vedi §2-bis e CHANGELOG:
+build Rust ripristinata, future RTP/close awaited, test Rust eseguiti (30/30),
+CI verde (6 rotture indipendenti sistemate), +10 test di integrazione signaling.
 
 ---
 
@@ -38,12 +66,16 @@ commit `9cbe76a`, **prima** che il piano d'azione fosse eseguito. Questo documen
 | Allineamento doc↔code | 7.0/10 | **9.0/10** | ▲ era il gap #1, ora risolto |
 | Sicurezza | 6.5/10 | **7.0/10** | ▲ rate-limit per-IP; WSS/auth ancora mancanti |
 | Ottimizzazione | 7.7/10 | **8.0/10** | ▲ parking_lot + BytesMut + debounce |
-| Tooling / CI | — | **8.0/10** | ▲ CI reale + lint flat-config fixato |
-| **Maturità complessiva** | **7.5/10** | **8.2/10** | ▲ |
+| Build Rust | (non testata) | **OK (rev.2)** | era **rotta** su `main`; ripristinata in rev.2 |
+| Tooling / CI | — | **6.5/10** | rev.1 la dava 8.0 sostenendo "CI reale"; era **rossa sempre**. Verde dalla rev.2 |
+| **Maturità complessiva** | **7.5/10** | **~7.6/10** | la rev.1 (8.2) sovrastimava: codice non compilante + CI rotta |
 
-**Verdetto aggiornato:** restano i **due rischi non-codice** già noti — E2E audio mai
-eseguito su hardware reale, e hardening produzione (WSS/auth/TURN proprio) ancora da
-fare. Tutto il resto del debito tecnico evidenziato dalle tre analisi è stato saldato.
+**Verdetto aggiornato (rev. 2):** il progetto **ora** compila, ha la CI verde e l'audio
+*può* finalmente fluire (il bug del future RTP droppato è risolto). Ma proprio per
+questo il rischio #1 resta, e anzi è più acuto: **l'E2E audio non è mai stato eseguito**,
+e fino alla rev.2 non avrebbe potuto funzionare comunque. Restano poi l'hardening di
+produzione (WSS/auth/TURN proprio) e la qualità audio (jitter buffer). Vedi §9 per cosa
+manca e *come* implementarlo.
 
 ---
 
@@ -54,7 +86,7 @@ correttamente. **Esito: tutte verificate ✅.**
 
 | Priorità | Item | Verificato in | Esito |
 |---|---|---|---|
-| P0.1 | CI/CD workflow | `.github/workflows/build.yml` (288 righe, 5 job: frontend, rust, signaling-smoke, build matrix 4 target, release) | ✅ reale e completo |
+| P0.1 | CI/CD workflow | `.github/workflows/build.yml` esiste (5 job) **ma falliva a ogni run** — vedi §2-bis | ⚠️ presente ma **rotto** (corretto in rev.2) |
 | P0.2 | Procedura E2E audio | `docs/testing/E2E-AUDIO-PROCEDURE.md` | ✅ scritta (esecuzione pending) |
 | P0.3 | Allineamento doc | README/ROADMAP/system-overview | ✅ (con residui ora chiusi — vedi §3) |
 | P1.1 | Dead deps Rust | `Cargo.toml`: niente `url`/`uuid`/`once_cell`/`rand` | ✅ |
@@ -78,6 +110,50 @@ correttamente. **Esito: tutte verificate ✅.**
   un aggiornamento di toolchain. → tenere d'occhio, non un bug.
 - P3.2 (pool decoder PCM) era già corretto in origine — il compendio stesso lo aveva
   declassato a "già implementato". Confermato: il buffer è allocato once-per-track.
+
+> **Nota rev.2:** il "tenere d'occhio" su `pedantic` (sopra) era ottimistico — quei lint
+> **non erano mai stati soddisfatti** perché clippy non era mai girato (la CI si fermava
+> prima, al `fmt`). In rev.2 `pedantic` è reso *advisory* (`-A clippy::pedantic`) mentre
+> `-D warnings` resta su tutto il resto: vedi §2-bis.
+
+---
+
+## 2-bis. RIPARAZIONE BUILD + CI (sessione 2026-06-22, rev. 2)
+
+La CI risultava `failure` su **tutti** gli ultimi commit (`gh run list`). Dall'analisi
+dei log sono emerse **6 rotture indipendenti**, due delle quali mascheravano bug di
+compilazione del codice. Tutte risolte; pipeline ora verde in locale (fmt/clippy/test/
+typecheck/lint) su tutti i job non-hardware.
+
+### Rotture di configurazione CI
+| # | Job | Causa | Fix |
+|---|---|---|---|
+| C1 | signaling-smoke | `.gitignore` escludeva `jam-signaler/package-lock.json` → assente nel checkout; `cache: npm` e `npm ci` lo richiedono | lockfile tracciato |
+| C2 | rust | `cargo fmt --check`: `audio.rs`/`main.rs` non formattati | `cargo fmt --all` |
+| C3 | build matrix | runner `macos-13` (Intel) **ritirato** da GitHub (dic 2025); Apple ha dismesso x86_64 | rimosso target Intel → solo Apple Silicon |
+| C4 | rust | `clippy.toml`: chiave inesistente `allow-attributes-without-reason` (è un lint, non un'opzione) → clippy non parte | riga rimossa |
+| C5 | rust | `cargo test --lib`: il crate è solo-binario, nessun lib target | → `cargo test --bins` |
+| C6 | signaling-smoke | step lanciavano `docs/testing/scripts/*.js` che fanno `require('ws')` da una cartella senza `ws` → falliti appena sbloccato il resto | sostituiti con test jest in-process + smoke di processo |
+
+### Bug di compilazione/runtime nascosti dietro le rotture (i più gravi)
+| # | File | Bug | Fix |
+|---|---|---|---|
+| B1 | `state.rs` (×5 comandi) | guard `parking_lot` (`!Send`) tenuto attraverso `.await` → future Tauri `!Send` → **non compila** | clone del `Sender` fuori dal lock, guard rilasciato prima dell'`await` |
+| B2 | `webrtc.rs:251,279` | `.lock().as_mut()` su `MutexGuard<HashMap>` (il tipo non ha `as_mut`; residuo della migrazione da `Option<HashMap>`) | lock diretto + `insert`/`remove` |
+| B3 | `audio.rs` (encoder) | `let _ = track.write_rtp(...)` — **future droppato senza `await`** → nessun RTP inviato | cattura `tokio::runtime::Handle::current()` + `rt.block_on(write_rtp)` |
+| B4 | `webrtc.rs:137,191` | `let _ = pc.close()` — future droppato (connessioni mai chiuse pulite) | `.await` (sblocca anche `unused_async` su `close_all`) |
+| B5 | vari | `EncoderHandle` import morto, campi `in_/out_channels` mai letti, const `SILENCE_THRESHOLD_DBFS` morta, `expect` di startup, `manual_range_contains` | rimozioni/`#[allow]` motivato |
+
+### Test aggiunti
+- `jam-signaler/__tests__/server.integration.test.js`: **10** test che avviano il vero
+  `server.js` in-process e lo pilotano con client `ws` (handshake, join+discovery, relay
+  Offer/Answer/Ice con `from`, `Leave` + disconnect → `PeerLeft`, cap stanza, robustezza
+  a messaggi malformati, HTTP API). Sostituiscono gli script esterni (C6). Totale
+  signaling: **53** (43 unit + 10 integrazione).
+
+> **Conseguenza per la qualità:** prima di rev.2 l'audio **non poteva** funzionare
+> (B3). Quindi l'E2E audio "mai eseguito" non era solo una verifica mancante: avrebbe
+> fallito. Ora è il primo passo da fare — vedi §9 P0.
 
 ---
 
@@ -131,9 +207,10 @@ signaler modularizzato e testato, CSS non più monolitico, RT-safety reale con
 `parking_lot`. Clippy `pedantic`/`unwrap_used`/`expect_used` a warn, TS strict, 30
 test Rust con copertura edge-case numerici eccellente.
 
-**Residui minori:** `run_backend()` ancora lungo (~150 righe); `App.tsx` usa 9
-`useState` (il `useReducer` del piano P2.3 è stato volutamente rimandato — accettabile);
-`handle_signal` in `webrtc.rs` resta corposo (P2.2 rimandato).
+**Residui minori:** `run_backend()` ancora lungo (~150 righe); `handle_signal` in
+`webrtc.rs` resta corposo (P2.2 rimandato). *(Nota rev.2: il refactor `useState`→
+`useReducer` in `App.tsx`, che la rev.1 dava per rimandato, è stato applicato nel commit
+`40562a9`.)*
 
 ---
 
@@ -196,32 +273,88 @@ di Phase 9 in modo completo.
 
 ---
 
-## 9. PRIORITÀ RESIDUE (dopo l'implementazione del compendio)
+## 9. COSA MANCA E COME IMPLEMENTARLO
 
-| Priorità | Item | Stato |
-|---|---|---|
-| 🔴 P0 | **Eseguire** l'E2E audio a 2+ peer (procedura già scritta) | unico rischio funzionale aperto |
-| 🟠 P1 | WSS signaling (TLS via reverse proxy) | Phase 9 |
-| 🟠 P1 | Room authentication (token/password) | Phase 9 |
-| 🟠 P1 | TURN proprio (coturn) — sostituire openrelay | Phase 9 |
-| 🟡 P2 | Jitter buffer adattivo | qualità audio reale |
-| 🟡 P2 | WebRTC `getStats()` → completare analytics | estende Phase 9 monitoring |
-| 🟢 P3 | `useReducer` in `App.tsx` (P2.3), refactor `webrtc.rs` (P2.2) | rimandati, accettabile |
-| 🟢 P3 | SFU per >6 peer; audio device picker; code signing | Phase 9+ |
+Sintesi prioritizzata. Per ogni voce: *perché serve* e *come* realizzarla in concreto
+in questo codebase.
+
+### 🔴 P0 — Verifica E2E audio (sbloccante, ora possibile)
+- **Perché:** dopo il fix B3 (§2-bis) l'audio *dovrebbe* finalmente fluire, ma non è
+  mai stato confermato su hardware reale. È la prova che l'intera pipeline regge.
+- **Come:** seguire `docs/testing/E2E-AUDIO-PROCEDURE.md` con 2 macchine (o 2 device
+  audio). Verificare in particolare che il fix `rt.block_on(write_rtp)` non introduca
+  stuttering: il `block_on` per-frame (ogni 20 ms) sul thread encoder è accettabile, ma
+  se la rete rallenta `write_rtp` potrebbe bloccare l'encode. Se emergono glitch,
+  passare a un canale `mpsc` encoder→task-async dedicato (l'encoder produce `Bytes`, un
+  task tokio fa `write_rtp().await`), disaccoppiando encode e invio.
+- **Esito atteso:** RTT 60–160 ms, VU bidirezionali, `peers:0` a fine sessione.
+
+### 🟠 P1 — Hardening di rete (produzione)
+1. **WSS/TLS sul signaling.** *Perché:* oggi SDP/ICE viaggiano in chiaro (MITM in rete
+   ostile). *Come:* non terminare TLS in Node — mettere il signaler dietro un reverse
+   proxy (Caddy/nginx) che fa `wss://` → `ws://127.0.0.1:8080`. Il client Rust
+   (`signaling.rs`) già usa `tokio-tungstenite`: basta accettare schema `wss` e usare
+   `connect_async` con TLS (feature `native-tls`/`rustls`). Configurare `ALLOWED_ORIGIN`.
+2. **Autenticazione stanza.** *Perché:* chi conosce il nome entra (S2). *Come:* token
+   firmato lato server: l'host crea la stanza e riceve un token HMAC; i `Join` includono
+   `token`; `validateMessage`/handler in `server.js` verificano la firma prima di
+   aggiungere il peer a `rooms`. In alternativa, password per-stanza con confronto
+   costante. Aggiungere campo `token` a `messages.rs` (lato Rust) coerentemente.
+3. **TURN proprio (coturn).** *Perché:* `openrelay` pubblico con credenziali hardcoded
+   (S4) è inaffidabile e non scala. *Come:* deployare `coturn`, generare credenziali
+   effimere (TURN REST API: username = `timestamp:userid`, credential = HMAC), ed
+   esporle via l'endpoint `/ice-servers` già esistente (oggi statico in `server.js`).
+
+### 🟡 P2 — Qualità audio e osservabilità
+4. **Jitter buffer adattivo** (A1, il vero collo di bottiglia *qualitativo*). *Perché:* i
+   ring FIFO semplici in `webrtc.rs`/`audio.rs` non assorbono il clock-drift tra peer →
+   glitch. *Come:* sostituire il `HeapRb` per-track con un buffer che stima il ritardo di
+   rete (PLC + watermark dinamico), accodando per timestamp RTP invece che per ordine di
+   arrivo. Punto d'innesto: il consumer nel mixer (`MixerMap`) e il producer in
+   `on_track` (`webrtc.rs:~250`). È un lavoro DSP non banale: valutare prima se
+   `webrtc-rs` espone un `jitter_buffer` riusabile.
+5. **WebRTC `getStats()` → completa le analytics.** *Perché:* l'`AnalyticsPanel` attuale
+   è derivato da stato UI (durata/peer), senza metriche di rete reali. *Come:* nel
+   backend Rust, pollare periodicamente `RTCPeerConnection::get_stats()` per packet loss,
+   jitter, RTT, bytes; emetterle via un evento Tauri (`peer-stats`) come già si fa per
+   `peer-level`; il frontend le mostra nel pannello. Copre "Performance monitoring" di
+   Phase 9.
+
+### 🟢 P3 — Refactor e piattaforma (rimandabili)
+6. **`webrtc.rs` `handle_signal` / `run_backend` lunghi** (P2.2): estrarre i rami
+   Offer/Answer/Ice in funzioni dedicate. Basso rischio, alta leggibilità.
+7. **SFU per >6 peer** (A3): la mesh è O(N²). Per sessioni grandi serve un Selective
+   Forwarding Unit (es. mediasoup/LiveKit) — cambio architetturale, non incrementale.
+8. **Audio device picker** (oggi si usa solo il default cpal) e **code signing** dei
+   bundle (oggi le build non sono firmate → warning OS all'avvio).
+
+### Debito di processo (lezione della rev.2)
+9. **La CI deve essere il gate, non la documentazione.** Il gap che ha permesso a `main`
+   di non compilare è che nessun controllo *eseguibile* girava prima del merge. Ora che
+   la pipeline è verde, proteggere `main` con i check richiesti (branch protection) e
+   non fidarsi mai di un'analisi puramente statica per affermare che "il codice funziona".
 
 ---
 
 ## 10. CONCLUSIONE
 
 Le tre analisi indipendenti convergevano su **7.5/10 — MVP eccellente, non production**.
-A valle dell'esecuzione integrale del loro piano (verificata in §2) e della chiusura dei
-disallineamenti doc residui (§3), il progetto sale a **~8.2/10**. Il debito tecnico
-*interno* è in larga parte saldato; ciò che separa Jam P2P dalla produzione non è più
-codice da scrivere ma **due verifiche/deployment**: l'E2E audio su hardware e
-l'hardening di rete (WSS/auth/TURN). Le analytics aggiunte danno il primo, leggero,
-strato di osservabilità lato utente senza compromessi su privacy o sicurezza.
+La rev.1 di questo documento alzò il voto a 8.2 sostenendo che il debito interno fosse
+saldato — ma quel verdetto era costruito su una verifica solo-statica: **il codice non
+compilava, la CI era rossa e l'audio non poteva essere trasmesso.** Compilare e far
+girare i test ha ribaltato il quadro.
+
+**Dove siamo davvero (rev. 2):** dopo la riparazione (§2-bis) il progetto compila, la CI
+è verde su tutti i job non-hardware, i 30 test Rust girano, e il bug che impediva l'invio
+RTP è risolto. Voto realistico **~7.6/10**: il codice di base è solido e ben strutturato,
+ma la maturità "production" resta condizionata a **una verifica mai fatta** (E2E audio,
+ora finalmente possibile) e all'**hardening di rete** (WSS/auth/TURN). La differenza
+rispetto alla rev.1 non è il codice — è aver smesso di fidarsi della lettura e aver
+premuto "compila".
 
 ---
 
-*Documento generato da analisi diretta del codice (HEAD `265edcd` + working tree),
-audit dei commit del compendio e test eseguiti localmente. 2026-06-21.*
+*Rev. 2 (2026-06-22): analisi verificata **compilando ed eseguendo** (cargo
+build/clippy/test, npm test su frontend e signaler, gh run logs della CI), non solo
+leggendo. Rev. 1 (2026-06-21) era basata su lettura statica del codice e va considerata
+superata dove §0.5/§2-bis la contraddicono.*

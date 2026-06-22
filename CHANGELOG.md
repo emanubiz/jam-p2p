@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### CI pipeline repair + signaling integration tests (2026-06-22)
+
+The CI had been **red on every commit**. Three independent breakages were diagnosed
+from the run logs and fixed, plus two latent failures that were masked behind them.
+
+#### Fixed (CI)
+- **Signaling job failed at "Setup Node.js"**: `.gitignore` excluded
+  `jam-signaler/package-lock.json`, so it was absent from the CI checkout — both
+  `cache: npm` and `npm ci` require a committed lockfile. The lockfile is now tracked.
+- **Rust job failed at `cargo fmt --check`**: `audio.rs` and `main.rs` were not
+  formatted. Ran `cargo fmt --all`.
+- **Build matrix used the retired `macos-13` (Intel) runner** (GitHub removed it in
+  Dec 2025; Apple dropped x86_64). Dropped the Intel target — Apple Silicon only.
+- **Latent: `cargo clippy` would have errored** on an invalid `clippy.toml` key
+  (`allow-attributes-without-reason` is a lint, not a config option). Removed it.
+- **Latent: `cargo test --lib` finds no targets** — tests live in the binary crate's
+  modules, and the crate has no lib target. Changed to `cargo test --bins`.
+- Removed two CI steps that ran `docs/testing/scripts/*.js` directly: they `require('ws')`
+  from a directory where it isn't installed (would fail once Node setup was fixed) and
+  are now redundant with the in-process jest integration tests.
+
+#### Added
+- **Signaling integration tests** (`jam-signaler/__tests__/server.integration.test.js`):
+  10 jest tests that boot the real `server.js` in-process and drive it with `ws` clients —
+  Welcome handshake, room join + peer discovery (`PeerList`/`NewPeer` with names),
+  Offer/Answer/Ice relay (with server-stamped `from`), graceful `Leave` and hard-disconnect
+  `PeerLeft`, the per-room cap (`Error`), malformed-message robustness, and the HTTP API
+  (`/health`, `/ice-servers`, `/room/:name` 404). Signaling test total: **53** (43 unit + 10).
+
+#### Changed
+- Bumped CI actions to `actions/checkout@v5` / `actions/setup-node@v5` and Node 20 → 22
+  (the v4 actions and Node 20 are deprecated on current runners).
+- `jam-signaler` test script now passes `--forceExit` (the in-process server keeps handles
+  open after the suite; this guarantees a clean exit instead of a hang).
+
+---
+
 This entry covers the **compendium hardening** work (local commits `ab55f2b`→`265edcd`)
 plus the follow-up audit, session analytics, and documentation pass. It implements the
 plan in `ANALISI_UNIFICATA.md` (formerly `COMPENDIO.md`).
