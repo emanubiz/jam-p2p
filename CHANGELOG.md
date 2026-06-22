@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **E2E audio status:** infrastructure prerequisites verified; bidirectional playback
   steps remain pending — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`.
 
+### Adaptive jitter buffer + WebRTC stats analytics (2026-06-22)
+
+- **Adaptive jitter buffer:** per-peer `AdaptiveJitterBuffer` replaces bare FIFO ring
+  buffers in the mixer; dynamic watermark from RTP timestamp jitter (RFC 3550).
+- **WebRTC getStats():** backend polls stats every 2 s; `session-stats` / `peer-stats`
+  events feed RTT, packet loss, and byte counters into `AnalyticsPanel`.
+- **Tests:** Rust **35** (+5 jitter buffer); frontend **25** (+1 analytics panel).
+
 ### Network hardening — WSS, room auth, own TURN (2026-06-22)
 
 - **Room authentication (opt-in):** `ROOM_AUTH_SECRET` enables HMAC tokens via
@@ -124,7 +132,7 @@ plan in `ANALISI_UNIFICATA.md` (formerly `COMPENDIO.md`).
   real hardware.
 - No WSS/TLS on the signaling channel; no room authentication; TURN still uses the public
   openrelay server.
-- No adaptive jitter buffer (audible glitches possible under network clock-drift).
+- Adaptive jitter buffer absorbs network clock-drift (2026-06-22).
 
 ---
 

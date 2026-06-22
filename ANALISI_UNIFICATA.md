@@ -9,8 +9,8 @@
 >
 > **Data:** 2026-06-22 (rev. 2) · **HEAD:** `main`
 > **GitNexus:** 862 simboli, 1201 relazioni, 22 cluster, 17 execution flow
-> **Test eseguiti (rev. 2, dopo riparazione build):** frontend **24/24** Vitest ·
-> signaling **53/53** Jest (43 unit + 10 integrazione in-process) · Rust **30/30**
+> **Test eseguiti (rev. 2, dopo riparazione build):** frontend **25/25** Vitest ·
+> signaling **63/63** Jest (43 unit + 10 integrazione in-process) · Rust **35/35**
 > `cargo test` · `cargo clippy -D warnings` OK · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
 
 ---
@@ -193,7 +193,8 @@ sample-rate Opus (anti silent-no-audio), single-offerer anti-glare, reconnect co
 backoff (ADR-001 + amendment).
 
 **Debolezze architetturali ancora aperte** (nessuna era nel piano del compendio):
-- **A1 — Nessun jitter buffer adattivo**: ring FIFO semplici → glitch sotto clock-drift.
+- **A1 — Nessun jitter buffer adattivo**: ~~ring FIFO semplici → glitch sotto clock-drift~~
+  **risolto** con `AdaptiveJitterBuffer` (2026-06-22).
   È il vero collo di bottiglia *qualitativo*, e si manifesterà proprio nell'E2E mai testato.
 - **A2 — `local_track` singola condivisa**: impedisce audio-processing per-peer in uscita.
 - **A3 — Mesh O(N²) senza fallback SFU**: >6 peer impraticabile (riconosciuto in roadmap).
@@ -316,7 +317,7 @@ in questo codebase.
    **Stato:** `TURN_SECRET` + `TURN_URLS` → credenziali REST dinamiche in Welcome e
    `/ice-servers`; `docker-compose.prod.yml` include coturn; openrelay resta fallback dev.
 
-### 🟡 P2 — Qualità audio e osservabilità
+### 🟡 P2 — Qualità audio e osservabilità — **implementato 2026-06-22**
 4. **Jitter buffer adattivo** (A1, il vero collo di bottiglia *qualitativo*). *Perché:* i
    ring FIFO semplici in `webrtc.rs`/`audio.rs` non assorbono il clock-drift tra peer →
    glitch. *Come:* sostituire il `HeapRb` per-track con un buffer che stima il ritardo di
@@ -324,16 +325,23 @@ in questo codebase.
    arrivo. Punto d'innesto: il consumer nel mixer (`MixerMap`) e il producer in
    `on_track` (`webrtc.rs:~250`). È un lavoro DSP non banale: valutare prima se
    `webrtc-rs` espone un `jitter_buffer` riusabile.
+   **Stato:** `AdaptiveJitterBuffer` in `jitter_buffer.rs` — stima jitter RFC 3550 da
+   timestamp RTP, watermark dinamico, starvation fallback; 5 unit test. Sostituisce
+   `HeapCons` nel `MixerMap`.
 5. **WebRTC `getStats()` → completa le analytics.** *Perché:* l'`AnalyticsPanel` attuale
    è derivato da stato UI (durata/peer), senza metriche di rete reali. *Come:* nel
    backend Rust, pollare periodicamente `RTCPeerConnection::get_stats()` per packet loss,
    jitter, RTT, bytes; emetterle via un evento Tauri (`peer-stats`) come già si fa per
    `peer-level`; il frontend le mostra nel pannello. Copre "Performance monitoring" di
    Phase 9.
+   **Stato:** poll ogni 2 s in `run_backend`; eventi `peer-stats` + `session-stats`;
+   `useNetworkStats` + seconda riga in `AnalyticsPanel` (RTT, lost, in/out bytes).
 
 ### 🟢 P3 — Refactor e piattaforma (rimandabili)
 6. **`webrtc.rs` `handle_signal` / `run_backend` lunghi** (P2.2): estrarre i rami
    Offer/Answer/Ice in funzioni dedicate. Basso rischio, alta leggibilità.
+   **Stato (parziale 2026-06-22):** estratti `handle_peer_list`, `handle_incoming_offer`,
+   `handle_incoming_answer`, `handle_incoming_ice`. `run_backend` ancora monolitico.
 7. **SFU per >6 peer** (A3): la mesh è O(N²). Per sessioni grandi serve un Selective
    Forwarding Unit (es. mediasoup/LiveKit) — cambio architetturale, non incrementale.
 8. **Audio device picker** (oggi si usa solo il default cpal) e **code signing** dei

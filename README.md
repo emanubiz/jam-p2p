@@ -344,7 +344,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining is
 
 **Completed:** Signaling server, Rust backend, WebRTC mesh, UI, CI/CD, graceful shutdown, message validation, VU throttling, component refactoring.
 
-**Next:** E2E audio verification on real hardware (prerequisites done — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`), deploy production stack (`docker-compose.prod.yml` with Caddy + coturn + `ROOM_AUTH_SECRET`), adaptive jitter buffer, WebRTC `getStats()` analytics, SFU for large sessions.
+**Next:** E2E audio verification on real hardware (only remaining P0 — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`), deploy production stack (`docker-compose.prod.yml`), SFU for large sessions, audio device picker, code signing.
 
 ---
 
@@ -361,8 +361,8 @@ ISC
 GitHub Actions pipeline (`.github/workflows/build.yml`) runs on every push and pull request to `main`:
 
 - **Frontend test job**: Vitest + ESLint + TypeScript typecheck on `ubuntu-latest`
-- **Rust test job**: `cargo test --bins` (30 unit tests), `cargo fmt --check`, `cargo clippy -D warnings` (with the `pedantic` group advisory via `-A clippy::pedantic`), `cargo audit`
-- **Signaling smoke job**: Jest unit + in-process integration tests (53) + standalone `node server.js` boot with HTTP `/health` and `/ice-servers` smoke
+- **Rust test job**: `cargo test --bins` (35 unit tests), `cargo fmt --check`, `cargo clippy -D warnings` (with the `pedantic` group advisory via `-A clippy::pedantic`), `cargo audit`
+- **Signaling smoke job**: Jest unit + in-process integration tests (63) + standalone `node server.js` boot with HTTP `/health` and `/ice-servers` smoke
 - **Build matrix**: Tauri release build on Linux (`.deb`, `.AppImage`, `.rpm`), macOS Apple Silicon (`.dmg`), Windows (`.msi`, `.exe`)
 - **Release**: tags matching `v*` produce a GitHub Release with all platform artifacts attached
 

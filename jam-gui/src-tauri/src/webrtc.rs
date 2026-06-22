@@ -1,12 +1,12 @@
 use ::webrtc::ice_transport::ice_server::RTCIceServer;
 use ::webrtc::peer_connection::configuration::RTCConfiguration;
 use ::webrtc::peer_connection::RTCPeerConnection;
+use ::webrtc::stats::StatsReportType;
 use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use ::webrtc::track::track_local::TrackLocal;
 use anyhow::{Context, Result};
 use opus::{Channels, Decoder};
 use parking_lot::Mutex;
-use ringbuf::{traits::Producer, traits::Split, HeapRb};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::Emitter;
@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 
 use crate::audio::{compute_audio_level, MixerMap};
 use crate::config::RING_BUFFER_SIZE_MULT;
+use crate::jitter_buffer::AdaptiveJitterBuffer;
 use crate::messages::SignalMessage;
 
 pub struct WebrtcContext {
@@ -70,54 +71,7 @@ impl PeerManager {
             SignalMessage::PeerList {
                 peers: remote_peers,
             } => {
-                for peer in remote_peers {
-                    let pid = peer.uuid;
-                    if self.peers.contains_key(&pid) {
-                        continue;
-                    }
-                    self.names.insert(pid.clone(), peer.name.clone());
-                    let pc = match self
-                        .create_peer_connection(pid.clone(), peer.name.clone(), ctx)
-                        .await
-                    {
-                        Ok(pc) => pc,
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to create peer connection for {}: {:?}",
-                                pid,
-                                e
-                            );
-                            continue;
-                        }
-                    };
-                    let offer = match pc.create_offer(None).await {
-                        Ok(o) => o,
-                        Err(e) => {
-                            tracing::error!("Failed to create offer for {}: {:?}", pid, e);
-                            continue;
-                        }
-                    };
-                    if let Err(e) = pc.set_local_description(offer.clone()).await {
-                        tracing::error!("Failed to set local description for {}: {:?}", pid, e);
-                        continue;
-                    }
-                    let sdp = match serde_json::to_string(&offer) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            tracing::error!("Failed to serialize offer for {}: {:?}", pid, e);
-                            continue;
-                        }
-                    };
-                    let _ = ctx
-                        .sig_tx
-                        .send(SignalMessage::Offer {
-                            target: pid.clone(),
-                            sdp,
-                            from: None,
-                        })
-                        .await;
-                    self.peers.insert(pid, pc);
-                }
+                self.handle_peer_list(remote_peers, ctx).await;
             }
             SignalMessage::NewPeer { uuid: pid, name } => {
                 // The newcomer received us in its PeerList and will send the
@@ -140,47 +94,121 @@ impl PeerManager {
             }
             SignalMessage::Offer { sdp, from, .. } => {
                 if let Some(pid) = from {
-                    if self.peers.contains_key(&pid) {
-                        return Ok(());
-                    }
-                    let name = self.names.get(&pid).cloned().unwrap_or_default();
-                    let pc = self.create_peer_connection(pid.clone(), name, ctx).await?;
-                    pc.set_remote_description(serde_json::from_str(&sdp)?)
-                        .await?;
-                    let answer = pc.create_answer(None).await?;
-                    pc.set_local_description(answer.clone()).await?;
-                    let sdp =
-                        serde_json::to_string(&answer).context("failed to serialize answer")?;
-                    let _ = ctx
-                        .sig_tx
-                        .send(SignalMessage::Answer {
-                            target: pid.clone(),
-                            sdp,
-                            from: None,
-                        })
-                        .await;
-                    self.peers.insert(pid, pc);
+                    self.handle_incoming_offer(&pid, &sdp, ctx).await?;
                 }
             }
             SignalMessage::Answer { sdp, from, .. } => {
                 if let Some(pid) = from {
-                    if let Some(pc) = self.peers.get(&pid) {
-                        pc.set_remote_description(serde_json::from_str(&sdp)?)
-                            .await?;
-                    }
+                    self.handle_incoming_answer(&pid, &sdp).await?;
                 }
             }
             SignalMessage::Ice {
                 candidate, from, ..
             } => {
                 if let Some(pid) = from {
-                    if let Some(pc) = self.peers.get(&pid) {
-                        let _ = pc
-                            .add_ice_candidate(serde_json::from_str(&candidate)?)
-                            .await;
-                    }
+                    self.handle_incoming_ice(&pid, &candidate).await?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.peers.is_empty()
+    }
+
+    async fn handle_peer_list(
+        &mut self,
+        remote_peers: Vec<crate::messages::PeerInfo>,
+        ctx: &WebrtcContext,
+    ) {
+        for peer in remote_peers {
+            let pid = peer.uuid;
+            if self.peers.contains_key(&pid) {
+                continue;
+            }
+            self.names.insert(pid.clone(), peer.name.clone());
+            let pc = match self
+                .create_peer_connection(pid.clone(), peer.name.clone(), ctx)
+                .await
+            {
+                Ok(pc) => pc,
+                Err(e) => {
+                    tracing::error!("Failed to create peer connection for {}: {:?}", pid, e);
+                    continue;
+                }
+            };
+            let offer = match pc.create_offer(None).await {
+                Ok(o) => o,
+                Err(e) => {
+                    tracing::error!("Failed to create offer for {}: {:?}", pid, e);
+                    continue;
+                }
+            };
+            if let Err(e) = pc.set_local_description(offer.clone()).await {
+                tracing::error!("Failed to set local description for {}: {:?}", pid, e);
+                continue;
+            }
+            let sdp = match serde_json::to_string(&offer) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Failed to serialize offer for {}: {:?}", pid, e);
+                    continue;
+                }
+            };
+            let _ = ctx
+                .sig_tx
+                .send(SignalMessage::Offer {
+                    target: pid.clone(),
+                    sdp,
+                    from: None,
+                })
+                .await;
+            self.peers.insert(pid, pc);
+        }
+    }
+
+    async fn handle_incoming_offer(
+        &mut self,
+        pid: &str,
+        sdp: &str,
+        ctx: &WebrtcContext,
+    ) -> Result<()> {
+        if self.peers.contains_key(pid) {
+            return Ok(());
+        }
+        let name = self.names.get(pid).cloned().unwrap_or_default();
+        let pc = self
+            .create_peer_connection(pid.to_string(), name, ctx)
+            .await?;
+        pc.set_remote_description(serde_json::from_str(sdp)?)
+            .await?;
+        let answer = pc.create_answer(None).await?;
+        pc.set_local_description(answer.clone()).await?;
+        let answer_sdp = serde_json::to_string(&answer).context("failed to serialize answer")?;
+        let _ = ctx
+            .sig_tx
+            .send(SignalMessage::Answer {
+                target: pid.to_string(),
+                sdp: answer_sdp,
+                from: None,
+            })
+            .await;
+        self.peers.insert(pid.to_string(), pc);
+        Ok(())
+    }
+
+    async fn handle_incoming_answer(&self, pid: &str, sdp: &str) -> Result<()> {
+        if let Some(pc) = self.peers.get(pid) {
+            pc.set_remote_description(serde_json::from_str(sdp)?)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn handle_incoming_ice(&self, pid: &str, candidate: &str) -> Result<()> {
+        if let Some(pc) = self.peers.get(pid) {
+            let _ = pc.add_ice_candidate(serde_json::from_str(candidate)?).await;
         }
         Ok(())
     }
@@ -190,6 +218,77 @@ impl PeerManager {
             tracing::info!("Closing peer connection: {}", pid);
             let _ = pc.close().await;
             let _ = handle.emit("peer-left", pid);
+        }
+    }
+
+    /// Poll WebRTC stats for each connected peer and emit Tauri events.
+    pub async fn poll_and_emit_stats(&self, handle: &tauri::AppHandle) {
+        let mut session_rtt_ms: f64 = 0.0;
+        let mut session_rtt_count = 0u32;
+        let mut session_packets_lost: i64 = 0;
+        let mut session_bytes_in: u64 = 0;
+        let mut session_bytes_out: u64 = 0;
+
+        for (pid, pc) in &self.peers {
+            let stats = pc.get_stats().await;
+            let mut rtt_ms: Option<f64> = None;
+            let mut packets_lost: i64 = 0;
+            let mut bytes_received: u64 = 0;
+            let mut bytes_sent: u64 = 0;
+
+            for report in stats.reports.values() {
+                match report {
+                    StatsReportType::RemoteInboundRTP(s) if s.kind == "audio" => {
+                        packets_lost = s.packets_lost;
+                        if let Some(rtt) = s.round_trip_time {
+                            rtt_ms = Some(rtt * 1000.0);
+                        }
+                    }
+                    StatsReportType::InboundRTP(s) if s.kind == "audio" => {
+                        bytes_received = s.bytes_received;
+                    }
+                    StatsReportType::OutboundRTP(s) if s.kind == "audio" => {
+                        bytes_sent = s.bytes_sent;
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(rtt) = rtt_ms {
+                session_rtt_ms += rtt;
+                session_rtt_count += 1;
+            }
+            session_packets_lost += packets_lost;
+            session_bytes_in += bytes_received;
+            session_bytes_out += bytes_sent;
+
+            let _ = handle.emit(
+                "peer-stats",
+                serde_json::json!({
+                    "id": pid,
+                    "rttMs": rtt_ms,
+                    "packetsLost": packets_lost,
+                    "bytesReceived": bytes_received,
+                    "bytesSent": bytes_sent,
+                }),
+            );
+        }
+
+        if session_rtt_count > 0 || session_bytes_in > 0 || session_bytes_out > 0 {
+            let avg_rtt_ms = if session_rtt_count > 0 {
+                Some(session_rtt_ms / f64::from(session_rtt_count))
+            } else {
+                None
+            };
+            let _ = handle.emit(
+                "session-stats",
+                serde_json::json!({
+                    "avgRttMs": avg_rtt_ms,
+                    "packetsLost": session_packets_lost,
+                    "bytesReceived": session_bytes_in,
+                    "bytesSent": session_bytes_out,
+                }),
+            );
         }
     }
 
@@ -246,9 +345,14 @@ impl PeerManager {
             let h_emit = handle_clone.clone();
             Box::pin(async move {
                 tracing::info!("Received track from peer {}", p_inner);
-                let rb = HeapRb::<f32>::new(sample_rate as usize * RING_BUFFER_SIZE_MULT);
-                let (mut prod, cons) = rb.split();
-                mixer_inner.lock().insert(p_inner.clone(), (cons, 1.0));
+                let jitter_buf = AdaptiveJitterBuffer::new(
+                    sample_rate,
+                    samples_per_frame,
+                    RING_BUFFER_SIZE_MULT,
+                );
+                mixer_inner
+                    .lock()
+                    .insert(p_inner.clone(), (jitter_buf, 1.0));
                 let mut dec = match Decoder::new(sample_rate, Channels::Mono) {
                     Ok(d) => d,
                     Err(e) => {
@@ -262,7 +366,9 @@ impl PeerManager {
                 while let Ok((rtp, _)) = track.read_rtp().await {
                     if let Ok(len) = dec.decode_float(&rtp.payload, &mut pcm, false) {
                         let samples = &pcm[..len];
-                        let _ = prod.push_slice(samples);
+                        if let Some((buf, _)) = mixer_inner.lock().get_mut(&p_inner) {
+                            buf.push_with_rtp_ts(samples, rtp.header.timestamp);
+                        }
                         prev_level = compute_audio_level(samples, prev_level);
                         if last_emit.elapsed().as_millis() >= crate::config::VU_THROTTLE_MS {
                             let _ = h_emit.emit(

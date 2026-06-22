@@ -14,13 +14,14 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
 use crate::config::{DEFAULT_OPUS_BITRATE, FRAME_SIZE_MS, RING_BUFFER_SIZE_MULT, RTP_PAYLOAD_TYPE};
+use crate::jitter_buffer::AdaptiveJitterBuffer;
 use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use ::webrtc::track::track_local::TrackLocalWriter;
 use opus::{Application, Bitrate, Channels, Encoder};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use tauri::{AppHandle, Emitter};
 
-pub type MixerMap = HashMap<String, (HeapCons<f32>, f32)>;
+pub type MixerMap = HashMap<String, (AdaptiveJitterBuffer, f32)>;
 
 pub struct AudioDevice {
     pub sample_rate: u32,
