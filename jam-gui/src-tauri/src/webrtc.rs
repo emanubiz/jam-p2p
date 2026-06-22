@@ -1,16 +1,16 @@
-use anyhow::{Context, Result};
-use opus::{Channels, Decoder};
-use ringbuf::{traits::Producer, traits::Split, HeapRb};
-use std::collections::HashMap;
-use parking_lot::Mutex;
-use std::sync::Arc;
-use tauri::Emitter;
-use tokio::sync::mpsc;
 use ::webrtc::ice_transport::ice_server::RTCIceServer;
 use ::webrtc::peer_connection::configuration::RTCConfiguration;
 use ::webrtc::peer_connection::RTCPeerConnection;
 use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use ::webrtc::track::track_local::TrackLocal;
+use anyhow::{Context, Result};
+use opus::{Channels, Decoder};
+use parking_lot::Mutex;
+use ringbuf::{traits::Producer, traits::Split, HeapRb};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tauri::Emitter;
+use tokio::sync::mpsc;
 
 use crate::audio::{compute_audio_level, MixerMap};
 use crate::config::RING_BUFFER_SIZE_MULT;
@@ -76,10 +76,17 @@ impl PeerManager {
                         continue;
                     }
                     self.names.insert(pid.clone(), peer.name.clone());
-                    let pc = match self.create_peer_connection(pid.clone(), peer.name.clone(), ctx).await {
+                    let pc = match self
+                        .create_peer_connection(pid.clone(), peer.name.clone(), ctx)
+                        .await
+                    {
                         Ok(pc) => pc,
                         Err(e) => {
-                            tracing::error!("Failed to create peer connection for {}: {:?}", pid, e);
+                            tracing::error!(
+                                "Failed to create peer connection for {}: {:?}",
+                                pid,
+                                e
+                            );
                             continue;
                         }
                     };
@@ -101,11 +108,14 @@ impl PeerManager {
                             continue;
                         }
                     };
-                    let _ = ctx.sig_tx.send(SignalMessage::Offer {
-                        target: pid.clone(),
-                        sdp,
-                        from: None,
-                    }).await;
+                    let _ = ctx
+                        .sig_tx
+                        .send(SignalMessage::Offer {
+                            target: pid.clone(),
+                            sdp,
+                            from: None,
+                        })
+                        .await;
                     self.peers.insert(pid, pc);
                 }
             }
@@ -124,7 +134,7 @@ impl PeerManager {
             }
             SignalMessage::PeerLeft { uuid: pid } => {
                 if let Some(pc) = self.peers.remove(&pid) {
-                    let _ = pc.close();
+                    let _ = pc.close().await;
                     let _ = ctx.handle.emit("peer-left", pid);
                 }
             }
@@ -141,11 +151,14 @@ impl PeerManager {
                     pc.set_local_description(answer.clone()).await?;
                     let sdp =
                         serde_json::to_string(&answer).context("failed to serialize answer")?;
-                    let _ = ctx.sig_tx.send(SignalMessage::Answer {
-                        target: pid.clone(),
-                        sdp,
-                        from: None,
-                    }).await;
+                    let _ = ctx
+                        .sig_tx
+                        .send(SignalMessage::Answer {
+                            target: pid.clone(),
+                            sdp,
+                            from: None,
+                        })
+                        .await;
                     self.peers.insert(pid, pc);
                 }
             }
@@ -175,7 +188,7 @@ impl PeerManager {
     pub async fn close_all(&mut self, handle: &tauri::AppHandle) {
         for (pid, pc) in self.peers.drain() {
             tracing::info!("Closing peer connection: {}", pid);
-            let _ = pc.close();
+            let _ = pc.close().await;
             let _ = handle.emit("peer-left", pid);
         }
     }
@@ -235,9 +248,7 @@ impl PeerManager {
                 tracing::info!("Received track from peer {}", p_inner);
                 let rb = HeapRb::<f32>::new(sample_rate as usize * RING_BUFFER_SIZE_MULT);
                 let (mut prod, cons) = rb.split();
-                if let Some(mut s) = mixer_inner.lock().as_mut() {
-                    s.insert(p_inner.clone(), (cons, 1.0));
-                }
+                mixer_inner.lock().insert(p_inner.clone(), (cons, 1.0));
                 let mut dec = match Decoder::new(sample_rate, Channels::Mono) {
                     Ok(d) => d,
                     Err(e) => {
@@ -263,9 +274,7 @@ impl PeerManager {
                     }
                 }
                 tracing::info!("Track from peer {} ended", p_inner);
-                if let Some(mut s) = mixer_inner.lock().as_mut() {
-                    s.remove(&p_inner);
-                }
+                mixer_inner.lock().remove(&p_inner);
             })
         }));
 
@@ -279,18 +288,28 @@ impl PeerManager {
                     match c.to_json() {
                         Ok(j) => match serde_json::to_string(&j) {
                             Ok(candidate) => {
-                                let _ = tx.send(SignalMessage::Ice {
-                                    target: p,
-                                    candidate,
-                                    from: None,
-                                }).await;
+                                let _ = tx
+                                    .send(SignalMessage::Ice {
+                                        target: p,
+                                        candidate,
+                                        from: None,
+                                    })
+                                    .await;
                             }
                             Err(e) => {
-                                tracing::warn!("Failed to serialize ICE candidate for peer {}: {:?}", p, e);
+                                tracing::warn!(
+                                    "Failed to serialize ICE candidate for peer {}: {:?}",
+                                    p,
+                                    e
+                                );
                             }
                         },
                         Err(e) => {
-                            tracing::warn!("Failed to convert ICE candidate to JSON for peer {}: {:?}", p, e);
+                            tracing::warn!(
+                                "Failed to convert ICE candidate to JSON for peer {}: {:?}",
+                                p,
+                                e
+                            );
                         }
                     }
                 }

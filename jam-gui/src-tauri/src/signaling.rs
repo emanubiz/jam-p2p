@@ -92,10 +92,13 @@ impl SignalingClient {
                 });
 
                 self.ws_sender = Some(write);
-                let _ = self.sig_tx.send(SignalMessage::Join {
-                    room: room.to_string(),
-                    name: name.to_string(),
-                }).await;
+                let _ = self
+                    .sig_tx
+                    .send(SignalMessage::Join {
+                        room: room.to_string(),
+                        name: name.to_string(),
+                    })
+                    .await;
                 let _ = res_tx.send(Ok(()));
             }
             Err(e) => {

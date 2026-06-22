@@ -37,9 +37,12 @@ pub async fn join_room(
         return Err("Already connected to a room. Leave first.".to_string());
     }
     let (res_tx, res_rx) = tokio::sync::oneshot::channel();
-    {
-        let tx = state.tx.lock();
-        tx.send(AppCommand::Join {
+    // Clone the Sender out of the mutex and drop the guard before awaiting: a
+    // parking_lot MutexGuard is !Send, so holding it across `.await` would make
+    // this command's future !Send, which Tauri's command system rejects.
+    let sender = state.tx.lock().clone();
+    sender
+        .send(AppCommand::Join {
             room,
             name,
             server,
@@ -47,7 +50,6 @@ pub async fn join_room(
         })
         .await
         .map_err(|e| e.to_string())?;
-    }
     res_rx
         .await
         .map_err(|_| "Internal backend error".to_string())?
@@ -61,12 +63,11 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
     // reconnect loop. The backend resets last_join unconditionally and the
     // connected flag flip is a no-op when already false.
     let (res_tx, res_rx) = tokio::sync::oneshot::channel();
-    {
-        let tx = state.tx.lock();
-        tx.send(AppCommand::Leave { res_tx })
-            .await
-            .map_err(|e| e.to_string())?;
-    }
+    let sender = state.tx.lock().clone();
+    sender
+        .send(AppCommand::Leave { res_tx })
+        .await
+        .map_err(|e| e.to_string())?;
     let result = res_rx
         .await
         .map_err(|_| "Internal backend error".to_string())?;
@@ -78,9 +79,14 @@ pub async fn leave_room(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn set_volume(state: State<'_, AppState>, peer_id: String, vol: f32) -> Result<(), String> {
-    let tx = state.tx.lock();
-    tx.send(AppCommand::SetVolume { peer_id, vol })
+pub async fn set_volume(
+    state: State<'_, AppState>,
+    peer_id: String,
+    vol: f32,
+) -> Result<(), String> {
+    let sender = state.tx.lock().clone();
+    sender
+        .send(AppCommand::SetVolume { peer_id, vol })
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -88,8 +94,9 @@ pub async fn set_volume(state: State<'_, AppState>, peer_id: String, vol: f32) -
 
 #[tauri::command]
 pub async fn set_opus_bitrate(state: State<'_, AppState>, bitrate: i32) -> Result<(), String> {
-    let tx = state.tx.lock();
-    tx.send(AppCommand::SetOpusBitrate { bitrate })
+    let sender = state.tx.lock().clone();
+    sender
+        .send(AppCommand::SetOpusBitrate { bitrate })
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -97,8 +104,9 @@ pub async fn set_opus_bitrate(state: State<'_, AppState>, bitrate: i32) -> Resul
 
 #[tauri::command]
 pub async fn set_muted(state: State<'_, AppState>, muted: bool) -> Result<(), String> {
-    let tx = state.tx.lock();
-    tx.send(AppCommand::SetMute { muted })
+    let sender = state.tx.lock().clone();
+    sender
+        .send(AppCommand::SetMute { muted })
         .await
         .map_err(|e| e.to_string())?;
     Ok(())

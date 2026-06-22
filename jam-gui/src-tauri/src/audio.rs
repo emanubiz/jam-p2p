@@ -14,9 +14,9 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use crate::config::{DEFAULT_OPUS_BITRATE, FRAME_SIZE_MS, RING_BUFFER_SIZE_MULT, RTP_PAYLOAD_TYPE};
-use opus::{Application, Bitrate, Channels, Encoder};
 use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use ::webrtc::track::track_local::TrackLocalWriter;
+use opus::{Application, Bitrate, Channels, Encoder};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use tauri::{AppHandle, Emitter};
 
@@ -24,8 +24,6 @@ pub type MixerMap = HashMap<String, (HeapCons<f32>, f32)>;
 
 pub struct AudioDevice {
     pub sample_rate: u32,
-    pub in_channels: usize,
-    pub out_channels: usize,
     pub samples_per_frame: usize,
     _input_stream: cpal::Stream,
     _output_stream: cpal::Stream,
@@ -156,8 +154,6 @@ pub fn init_audio() -> Result<AudioDevice> {
 
     Ok(AudioDevice {
         sample_rate,
-        in_channels,
-        out_channels,
         samples_per_frame,
         _input_stream: input_stream,
         _output_stream: output_stream,
@@ -186,80 +182,88 @@ pub fn start_encoder_thread(
 ) -> EncoderHandle {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
+    // The encoder runs on a dedicated OS thread so the blocking Opus encode and
+    // the 1 ms mic-drain spin never touch the tokio runtime. Capture a runtime
+    // handle now — while we are still inside run_backend's runtime — so the
+    // thread can drive the async `track.write_rtp` to completion. Without this
+    // the RTP future was constructed and immediately dropped (`let _ = ...`), so
+    // no Opus packet was ever actually sent on the wire.
+    let rt = tokio::runtime::Handle::current();
+
     thread::spawn(move || {
         let result = catch_unwind(AssertUnwindSafe(|| {
-        let mut encoder = match Encoder::new(sample_rate, Channels::Mono, Application::Voip) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::error!("Failed to create Opus encoder: {:?}", e);
-                return;
-            }
-        };
-        let _ = encoder.set_bitrate(Bitrate::Bits(DEFAULT_OPUS_BITRATE));
-        let mut pcm_buf = Vec::with_capacity(samples_per_frame);
-        let mut out_buf = [0u8; 1024];
-        // Reused packet buffer. `split().freeze()` produces an immutable
-        // `Bytes` view into our pool without an extra copy: avoids the
-        // ~50 alloc/s of `Bytes::copy_from_slice(&out_buf[..len])`.
-        let mut packet_buf = BytesMut::with_capacity(1024);
-        let mut seq: u16 = 0;
-        let mut timestamp: u32 = 0;
-        let mut prev_level = 0.0f32;
-        let mut last_emit = std::time::Instant::now();
-        let mut cached_bitrate = DEFAULT_OPUS_BITRATE;
-
-        loop {
-            if *shutdown_rx.borrow() {
-                tracing::info!("Encoder thread shutting down");
-                break;
-            }
-
-            // Clamp to Opus' usable range; the UI sends bits/s and a stray
-            // value (e.g. raw kbps) must not wedge the encoder at the minimum.
-            let br = opus_bitrate.load(Ordering::Relaxed).clamp(8_000, 256_000);
-            if br != cached_bitrate {
-                let _ = encoder.set_bitrate(Bitrate::Bits(br));
-                cached_bitrate = br;
-            }
-            // Fill one frame straight from the mic ring buffer. No mixer lock
-            // here — that lock is shared with the real-time output callback,
-            // and holding it per-sample starved playback.
-            while pcm_buf.len() < samples_per_frame {
-                if *shutdown_rx.borrow() {
+            let mut encoder = match Encoder::new(sample_rate, Channels::Mono, Application::Voip) {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::error!("Failed to create Opus encoder: {:?}", e);
                     return;
                 }
-                if let Some(s) = mic_cons.try_pop() {
-                    pcm_buf.push(s);
-                } else {
-                    thread::sleep(Duration::from_millis(1));
-                }
-            }
-            if let Ok(len) = encoder.encode_float(&pcm_buf, &mut out_buf) {
-                packet_buf.clear();
-                packet_buf.extend_from_slice(&out_buf[..len]);
-                let payload = packet_buf.split().freeze();
-                let _ = track.write_rtp(&webrtc::rtp::packet::Packet {
-                    header: webrtc::rtp::header::Header {
-                        payload_type: RTP_PAYLOAD_TYPE,
-                        sequence_number: seq,
-                        timestamp,
-                        ..Default::default()
-                    },
-                    payload,
-                });
+            };
+            let _ = encoder.set_bitrate(Bitrate::Bits(DEFAULT_OPUS_BITRATE));
+            let mut pcm_buf = Vec::with_capacity(samples_per_frame);
+            let mut out_buf = [0u8; 1024];
+            // Reused packet buffer. `split().freeze()` produces an immutable
+            // `Bytes` view into our pool without an extra copy: avoids the
+            // ~50 alloc/s of `Bytes::copy_from_slice(&out_buf[..len])`.
+            let mut packet_buf = BytesMut::with_capacity(1024);
+            let mut seq: u16 = 0;
+            let mut timestamp: u32 = 0;
+            let mut prev_level = 0.0f32;
+            let mut last_emit = std::time::Instant::now();
+            let mut cached_bitrate = DEFAULT_OPUS_BITRATE;
 
-                let level = compute_audio_level(&pcm_buf, prev_level);
-                prev_level = level;
-                if last_emit.elapsed().as_millis() >= crate::config::VU_THROTTLE_MS {
-                    let _ = handle.emit("local-level", serde_json::json!({"level": level}));
-                    last_emit = std::time::Instant::now();
+            loop {
+                if *shutdown_rx.borrow() {
+                    tracing::info!("Encoder thread shutting down");
+                    break;
                 }
 
-                seq = seq.wrapping_add(1);
-                timestamp = timestamp.wrapping_add(samples_per_frame as u32);
+                // Clamp to Opus' usable range; the UI sends bits/s and a stray
+                // value (e.g. raw kbps) must not wedge the encoder at the minimum.
+                let br = opus_bitrate.load(Ordering::Relaxed).clamp(8_000, 256_000);
+                if br != cached_bitrate {
+                    let _ = encoder.set_bitrate(Bitrate::Bits(br));
+                    cached_bitrate = br;
+                }
+                // Fill one frame straight from the mic ring buffer. No mixer lock
+                // here — that lock is shared with the real-time output callback,
+                // and holding it per-sample starved playback.
+                while pcm_buf.len() < samples_per_frame {
+                    if *shutdown_rx.borrow() {
+                        return;
+                    }
+                    if let Some(s) = mic_cons.try_pop() {
+                        pcm_buf.push(s);
+                    } else {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                if let Ok(len) = encoder.encode_float(&pcm_buf, &mut out_buf) {
+                    packet_buf.clear();
+                    packet_buf.extend_from_slice(&out_buf[..len]);
+                    let payload = packet_buf.split().freeze();
+                    let _ = rt.block_on(track.write_rtp(&webrtc::rtp::packet::Packet {
+                        header: webrtc::rtp::header::Header {
+                            payload_type: RTP_PAYLOAD_TYPE,
+                            sequence_number: seq,
+                            timestamp,
+                            ..Default::default()
+                        },
+                        payload,
+                    }));
+
+                    let level = compute_audio_level(&pcm_buf, prev_level);
+                    prev_level = level;
+                    if last_emit.elapsed().as_millis() >= crate::config::VU_THROTTLE_MS {
+                        let _ = handle.emit("local-level", serde_json::json!({"level": level}));
+                        last_emit = std::time::Instant::now();
+                    }
+
+                    seq = seq.wrapping_add(1);
+                    timestamp = timestamp.wrapping_add(samples_per_frame as u32);
+                }
+                pcm_buf.clear();
             }
-            pcm_buf.clear();
-        }
         }));
         if let Err(panic) = result {
             let msg = if let Some(s) = panic.downcast_ref::<&str>() {
@@ -331,22 +335,23 @@ mod tests {
 
     #[test]
     fn test_alternating_signal() {
-        let samples: Vec<f32> = (0..100).map(|i| if i % 2 == 0 { 0.5 } else { -0.5 }).collect();
+        let samples: Vec<f32> = (0..100)
+            .map(|i| if i % 2 == 0 { 0.5 } else { -0.5 })
+            .collect();
         let level = compute_audio_level(&samples, 0.0);
         assert!(
             level > 0.01,
             "alternating signal should produce non-zero level"
         );
-        assert!(
-            level < 0.99,
-            "alternating signal should not be near max"
-        );
+        assert!(level < 0.99, "alternating signal should not be near max");
     }
 
     #[test]
     fn test_alternating_full_scale() {
         // Alternating +1.0/-1.0 has same RMS as constant 1.0
-        let samples: Vec<f32> = (0..100).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let samples: Vec<f32> = (0..100)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
         let level = compute_audio_level(&samples, 0.0);
         assert!(
             (level - 0.3).abs() < 0.01,
@@ -395,11 +400,7 @@ mod tests {
             level = compute_audio_level(&full, level);
         }
         // 1.0 - 0.7^20 ≈ 0.9992
-        assert!(
-            level > 0.99,
-            "EMA should converge near 1.0, got {}",
-            level
-        );
+        assert!(level > 0.99, "EMA should converge near 1.0, got {}", level);
     }
 
     #[test]
@@ -425,10 +426,7 @@ mod tests {
         let samples = vec![0.5f32; 1];
         let level = compute_audio_level(&samples, 0.0);
         assert!(!level.is_nan(), "single sample should not produce NaN");
-        assert!(
-            level > 0.0,
-            "single sample should produce positive level"
-        );
+        assert!(level > 0.0, "single sample should produce positive level");
     }
 
     #[test]
@@ -459,14 +457,8 @@ mod tests {
     fn test_infinity_safety() {
         let samples = vec![f32::INFINITY; 100];
         let level = compute_audio_level(&samples, 0.0);
-        assert!(
-            level.is_finite(),
-            "infinity input should not cause NaN/inf"
-        );
-        assert!(
-            level >= 0.0 && level <= 1.0,
-            "level must be in [0,1] range"
-        );
+        assert!(level.is_finite(), "infinity input should not cause NaN/inf");
+        assert!((0.0..=1.0).contains(&level), "level must be in [0,1] range");
     }
 
     #[test]
