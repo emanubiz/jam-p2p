@@ -345,7 +345,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining is
 
 **Completed:** Signaling server, Rust backend, WebRTC mesh, UI, CI/CD, graceful shutdown, message validation, VU throttling, component refactoring.
 
-**Next:** E2E audio verification on real hardware (P0 — see `docs/testing/E2E-AUDIO-PROCEDURE.md`), validate secure stack (`docs/testing/P0.5-SECURE-PATH-PROCEDURE.md`), branch protection (`docs/process/BRANCH-PROTECTION.md`), SFU for large sessions, audio device picker, code signing.
+**Next:** Validate secure stack (`docs/testing/P0.5-SECURE-PATH-PROCEDURE.md`), SFU for large sessions, audio device picker, code signing. E2E audio on hardware deferred per owner decision.
 
 ---
 

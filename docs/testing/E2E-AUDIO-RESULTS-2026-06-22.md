@@ -1,7 +1,8 @@
 # E2E Audio Results — 2026-06-22
 
 Manual end-to-end audio verification per `docs/testing/E2E-AUDIO-PROCEDURE.md`.
-**Status: PARTIAL — infrastructure verified; audio playback steps deferred.**
+**Status: DEFERRED — excluded by owner decision (2026-06-22).**
+Infrastructure prerequisites verified; bidirectional playback on real hardware not in scope.
 
 ## Automated / agent-verified prerequisites
 
@@ -32,6 +33,9 @@ Manual end-to-end audio verification per `docs/testing/E2E-AUDIO-PROCEDURE.md`.
 
 User chose (via agent prompt, 2026-06-22 session 2): skip P0 E2E for this session as well;
 agent advanced P0.5 (TURN integration tests, secure-dev docker stack, validation procedure).
+
+User chose (2026-06-22 session 3): **exclude P0 E2E permanently** from operational roadmap —
+no further prompts for hardware audio verification.
 
 ## Environment
 

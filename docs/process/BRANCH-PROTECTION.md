@@ -1,7 +1,8 @@
 # Branch protection for `main`
 
 The CI workflow `.github/workflows/build.yml` runs on every push/PR to `main`.
-As of 2026-06-22, **`main` is not protected** — merges can bypass failing checks.
+As of 2026-06-22, **`main` is protected** — merges require passing CI checks
+(`Frontend tests (vitest + lint)`, `Rust unit tests`, `Signaling server smoke test`).
 
 ## Recommended GitHub settings
 
@@ -18,15 +19,8 @@ Repository → **Settings** → **Branches** → **Add rule** for `main`:
 ## CLI (repo admin)
 
 ```bash
-gh api repos/emanubiz/jam-p2p/branches/main/protection \
-  -X PUT \
-  -f required_status_checks[strict]=true \
-  -f required_status_checks[contexts][]="Frontend tests (vitest + lint)" \
-  -f required_status_checks[contexts][]="Rust unit tests" \
-  -f required_status_checks[contexts][]="Signaling server smoke test" \
-  -f enforce_admins=true \
-  -f required_pull_request_reviews=null \
-  -f restrictions=null
+gh api repos/emanubiz/jam-p2p/branches/main/protection -X PUT \
+  --input docs/process/branch-protection-payload.json
 ```
 
 Job names must match `.github/workflows/build.yml` exactly. List current checks:
