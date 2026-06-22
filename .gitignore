@@ -1,5 +1,4 @@
 /jam-signaler/node_modules
-/jam-signaler/package-lock.json
 /jam-signaler/dist/file.js
 /jam-signaler/dist/index.js
 /jam-signaler/dist/worker-pipeline.js
