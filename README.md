@@ -208,6 +208,7 @@ The signaling server (`jam-signaler/server.js`) coordinates initial WebRTC conne
 - Optional room authentication via HMAC tokens (`ROOM_AUTH_SECRET`)
 - Optional own TURN with ephemeral REST credentials (`TURN_SECRET` + coturn)
 - Production TLS: Caddy reverse proxy (`docker-compose.prod.yml`, `Caddyfile`)
+- Secure dev (Windows): `docker-compose.secure-dev.yml` + `Caddyfile.secure-dev` — see `docs/testing/P0.5-SECURE-PATH-PROCEDURE.md`
 - Graceful shutdown on SIGTERM/SIGINT
 
 ---
@@ -306,7 +307,7 @@ cd jam-gui/src-tauri && cargo test
 
 - **Rust**: 35 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN/Inf safety, clipping, extreme values, convergence), Opus sample-rate selection (`pick_common_opus_rate`), the adaptive jitter buffer (`jitter_buffer.rs`), plus 7 serde wire-protocol round-trip tests
 - **Frontend**: 25 Vitest tests — rendering (logo, connection form, inputs, component structure, display-name label), interaction tests (connect/join, error surfacing, mute toggle, disconnect, bitrate change), and analytics-panel tests (duration formatting, network stats, collapsed state)
-- **Signaling**: 63 Jest tests — unit (`lib/__tests__/`: validation, rate-limit, rooms, room-auth, turn-credentials) + 10 in-process integration (`__tests__/server.integration.test.js`: boots the real `server.js` and drives it with `ws` clients — handshake, room join/discovery, Offer/Answer/Ice relay, Leave + hard-disconnect `PeerLeft`, per-room cap, malformed-message robustness, HTTP API)
+- **Signaling**: 69 Jest tests — unit + in-process integration (room-auth, TURN REST, wire contract)
 
 ---
 
@@ -344,7 +345,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full development roadmap and remaining is
 
 **Completed:** Signaling server, Rust backend, WebRTC mesh, UI, CI/CD, graceful shutdown, message validation, VU throttling, component refactoring.
 
-**Next:** E2E audio verification on real hardware (only remaining P0 — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`), deploy production stack (`docker-compose.prod.yml`), SFU for large sessions, audio device picker, code signing.
+**Next:** E2E audio verification on real hardware (P0 — see `docs/testing/E2E-AUDIO-PROCEDURE.md`), validate secure stack (`docs/testing/P0.5-SECURE-PATH-PROCEDURE.md`), branch protection (`docs/process/BRANCH-PROTECTION.md`), SFU for large sessions, audio device picker, code signing.
 
 ---
 
@@ -362,7 +363,7 @@ GitHub Actions pipeline (`.github/workflows/build.yml`) runs on every push and p
 
 - **Frontend test job**: Vitest + ESLint + TypeScript typecheck on `ubuntu-latest`
 - **Rust test job**: `cargo test --bins` (35 unit tests), `cargo fmt --check`, `cargo clippy -D warnings` (with the `pedantic` group advisory via `-A clippy::pedantic`), `cargo audit`
-- **Signaling smoke job**: Jest unit + in-process integration tests (67) + standalone `node server.js` boot with HTTP `/health` and `/ice-servers` smoke
+- **Signaling smoke job**: Jest unit + in-process integration tests (69) + standalone `node server.js` boot with HTTP `/health` and `/ice-servers` smoke
 - **Build matrix**: Tauri release build on Linux (`.deb`, `.AppImage`, `.rpm`), macOS Apple Silicon (`.dmg`), Windows (`.msi`, `.exe`)
 - **Release**: tags matching `v*` produce a GitHub Release with all platform artifacts attached
 

@@ -1,0 +1,79 @@
+# Secure dev stack for P0.5 validation on Windows/macOS/Linux (no coturn host mode).
+#
+# Usage:
+#   cp .env.example .env
+#   # set ROOM_AUTH_SECRET and TURN_SECRET (openssl rand -hex 32)
+#   docker compose -f docker-compose.secure-dev.yml up -d --build
+#
+# Endpoints:
+#   wss://localhost        (Caddy, self-signed TLS via `tls internal`)
+#   http://localhost:8080  (signaler direct — dev only)
+#   turn:127.0.0.1:3478    (coturn with ephemeral REST credentials)
+#
+# Point the Tauri client at wss://localhost and fetch a room token from
+# GET https://localhost/room/:name/token (accept the self-signed cert once).
+
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: jam-coturn-dev
+    restart: unless-stopped
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49152-49200:49152-49200/udp"
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:-dev-turn-secret-change-me}
+      - --realm=jam-p2p
+      - --listening-port=3478
+      - --min-port=49152
+      - --max-port=49200
+    networks:
+      - jam-secure
+
+  jam-signaler:
+    build: .
+    container_name: jam-signaler-secure-dev
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - LOG_LEVEL=info
+      - ALLOWED_ORIGIN=${ALLOWED_ORIGIN:-*}
+      - ROOM_AUTH_SECRET=${ROOM_AUTH_SECRET:-dev-room-auth-secret-change-me}
+      - TURN_SECRET=${TURN_SECRET:-dev-turn-secret-change-me}
+      - TURN_URLS=${TURN_URLS:-turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp}
+    expose:
+      - "8080"
+    networks:
+      - jam-secure
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: jam-caddy-dev
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    environment:
+      - SIGNALING_DOMAIN=localhost
+    volumes:
+      - ./Caddyfile.secure-dev:/etc/caddy/Caddyfile:ro
+      - caddy_dev_data:/data
+      - caddy_dev_config:/config
+    depends_on:
+      - jam-signaler
+    networks:
+      - jam-secure
+
+networks:
+  jam-secure:
+    driver: bridge
+
+volumes:
+  caddy_dev_data:
+  caddy_dev_config:

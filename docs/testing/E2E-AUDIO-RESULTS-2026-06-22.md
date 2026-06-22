@@ -8,7 +8,7 @@ Manual end-to-end audio verification per `docs/testing/E2E-AUDIO-PROCEDURE.md`.
 | Step | Result | Notes |
 |---|---|---|
 | GitNexus analyze | ✅ | 695 nodes, 1033 edges, 22 clusters, 17 flows (incremental, 11s) |
-| Test suite | ✅ | Vitest 24/24 · Jest 53/53 · `cargo test` 30/30 |
+| Test suite | ✅ | Vitest 25/25 · Jest **69**/69 · `cargo test` 35/35 |
 | Signaling `/health` | ✅ | `{"status":"ok","rooms":0,"peers":0}` (port 8080 already in use on workstation) |
 | Signaling `/ice-servers` | ✅ | STUN Google + openrelay TURN returned |
 | `cargo build` (Rust backend) | ✅ | Compiles after B3 fix |
@@ -30,10 +30,8 @@ Manual end-to-end audio verification per `docs/testing/E2E-AUDIO-PROCEDURE.md`.
 
 ## Decision log
 
-User chose (via agent prompt): skip full E2E for this session and implement the
-**mpsc encoder→async-RTP** decoupling first (§9 P0 mitigation for `block_on`
-stutter risk). E2E audio playback remains the next blocking item before treating
-Phase 8 builds as audio-trustworthy.
+User chose (via agent prompt, 2026-06-22 session 2): skip P0 E2E for this session as well;
+agent advanced P0.5 (TURN integration tests, secure-dev docker stack, validation procedure).
 
 ## Environment
 
@@ -43,7 +41,7 @@ Phase 8 builds as audio-trustworthy.
 | **Rust** | cargo test OK (dev profile) |
 | **Node** | v24.17.0 |
 | **Tauri** | v2 (dev) |
-| **Git HEAD** | `a9dd5bc` (+ local mpsc change uncommitted) |
+| **Git HEAD** | `33678c9` (main, synced with origin) |
 
 ## Next action
 
