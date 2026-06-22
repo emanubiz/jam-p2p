@@ -7,7 +7,7 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 8) · **HEAD:** `be7c650` (pending CI fix commit)
+> **Data:** 2026-06-22 (rev. 8) · **HEAD:** `7323dc8`
 > **GitNexus (reindex rev.8):** 816 nodi, 1302 archi, 27 cluster, 23 execution flow
 > **Test eseguiti (rev. 8):** frontend **25/25** Vitest ·
 > signaling **69/69** Jest · Rust **36/36**
