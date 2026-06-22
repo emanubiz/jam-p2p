@@ -305,7 +305,7 @@ cd jam-gui/src-tauri && cargo test
 
 ### Test Coverage
 
-- **Rust**: 35 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN/Inf safety, clipping, extreme values, convergence), Opus sample-rate selection (`pick_common_opus_rate`), the adaptive jitter buffer (`jitter_buffer.rs`), plus 7 serde wire-protocol round-trip tests
+- **Rust**: 36 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN/Inf safety, clipping, extreme values, convergence), Opus sample-rate selection (`pick_common_opus_rate`), the adaptive jitter buffer (`jitter_buffer.rs`), cpal device enumeration, plus 7 serde wire-protocol round-trip tests
 - **Frontend**: 25 Vitest tests — rendering (logo, connection form, inputs, component structure, display-name label), interaction tests (connect/join, error surfacing, mute toggle, disconnect, bitrate change), and analytics-panel tests (duration formatting, network stats, collapsed state)
 - **Signaling**: 69 Jest tests — unit + in-process integration (room-auth, TURN REST, wire contract)
 
@@ -362,7 +362,7 @@ ISC
 GitHub Actions pipeline (`.github/workflows/build.yml`) runs on every push and pull request to `main`:
 
 - **Frontend test job**: Vitest + ESLint + TypeScript typecheck on `ubuntu-latest`
-- **Rust test job**: `cargo test --bins` (35 unit tests), `cargo fmt --check`, `cargo clippy -D warnings` (with the `pedantic` group advisory via `-A clippy::pedantic`), `cargo audit`
+- **Rust test job**: `cargo test --bins` (36 unit tests), `cargo fmt --check`, `cargo clippy -D warnings` (with the `pedantic` group advisory via `-A clippy::pedantic`), `cargo audit`
 - **Signaling smoke job**: Jest unit + in-process integration tests (69) + standalone `node server.js` boot with HTTP `/health` and `/ice-servers` smoke
 - **Build matrix**: Tauri release build on Linux (`.deb`, `.AppImage`, `.rpm`), macOS Apple Silicon (`.dmg`), Windows (`.msi`, `.exe`)
 - **Release**: tags matching `v*` produce a GitHub Release with all platform artifacts attached

@@ -105,6 +105,11 @@ pub async fn set_opus_bitrate(state: State<'_, AppState>, bitrate: i32) -> Resul
 }
 
 #[tauri::command]
+pub fn list_audio_devices() -> Result<crate::audio::AudioDeviceList, String> {
+    crate::audio::list_audio_devices().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn set_muted(state: State<'_, AppState>, muted: bool) -> Result<(), String> {
     let sender = state.tx.lock().clone();
     sender
