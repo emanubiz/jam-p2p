@@ -1,0 +1,5 @@
+# Dev-only Caddy config: self-signed TLS for localhost (P0.5 secure-dev stack).
+localhost {
+	tls internal
+	reverse_proxy jam-signaler:8080
+}

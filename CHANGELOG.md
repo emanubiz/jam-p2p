@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P0.5 secure path — TURN integration + dev stack (2026-06-22)
+
+- **TURN REST integration tests:** `/ice-servers` and Welcome emit ephemeral coturn
+  credentials when `TURN_SECRET` is set (no openrelay fallback).
+- **Secure dev stack:** `docker-compose.secure-dev.yml` + `Caddyfile.secure-dev` for
+  WSS/auth/TURN on Windows (coturn with port mapping, Caddy `tls internal`).
+- **Docs:** `docs/testing/P0.5-SECURE-PATH-PROCEDURE.md`, `docs/process/BRANCH-PROTECTION.md`.
+- **Tests:** signaler **69** (+2 TURN integration).
+
 ### Room auth integration + RTT fallback (2026-06-22)
 
 - **P0.5 (partial):** in-process integration tests for `ROOM_AUTH_SECRET` — Join without
