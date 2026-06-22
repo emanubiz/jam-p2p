@@ -34,6 +34,7 @@ fn main() {
             state::leave_room,
             state::set_opus_bitrate,
             state::set_muted,
+            state::list_audio_devices,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
