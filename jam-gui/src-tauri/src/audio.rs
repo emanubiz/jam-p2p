@@ -118,11 +118,7 @@ pub fn init_audio() -> Result<AudioDevice> {
         &config_out,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             data.fill(0.0);
-            let frames = if out_channels > 0 {
-                data.len() / out_channels
-            } else {
-                0
-            };
+            let frames = data.len().checked_div(out_channels).unwrap_or(0);
             // Real-time callback: never block. If the mixer map is being
             // mutated elsewhere, output the silence we already filled in.
             // `parking_lot::Mutex::try_lock` returns `Option<MutexGuard>`
