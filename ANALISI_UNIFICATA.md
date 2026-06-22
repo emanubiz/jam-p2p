@@ -7,9 +7,9 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 7) · **HEAD:** `d0d44db`
-> **GitNexus (reindex rev.7):** 816 nodi, 1302 archi, 27 cluster, 23 execution flow
-> **Test eseguiti (rev. 7):** frontend **25/25** Vitest ·
+> **Data:** 2026-06-22 (rev. 8) · **HEAD:** `be7c650` (pending CI fix commit)
+> **GitNexus (reindex rev.8):** 816 nodi, 1302 archi, 27 cluster, 23 execution flow
+> **Test eseguiti (rev. 8):** frontend **25/25** Vitest ·
 > signaling **69/69** Jest · Rust **36/36**
 > `cargo test` · `cargo clippy -D warnings -A pedantic` 0 warning · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
 
@@ -67,8 +67,8 @@ commit `9cbe76a`, **prima** che il piano d'azione fosse eseguito. Questo documen
 | Sicurezza | 6.5/10 | 7.5/10 | **8.0/10** | ▲ room auth HMAC e TURN REST ora **implementati e unit-testati**, non solo "ready" |
 | Ottimizzazione | 7.7/10 | 8.0/10 | **8.5/10** | ▲ encoder→RTP via mpsc (niente più `block_on` per-frame) + jitter buffer adattivo |
 | Build Rust | (non testata) | OK | **OK** | verde, ri-verificata in rev.3 |
-| Tooling / CI | — | 6.5/10 | **7.5/10** | verde sui 3 job gate; branch protection attiva; build Tauri multi-OS ancora flaky |
-| Test (Rust / FE / signaler) | — | 30 / 25 / 53 | **35 / 25 / 63** | ▲ +5 jitter, +10 auth/turn/validation |
+| Tooling / CI | — | 6.5/10 | **7.5/10** | verde sui 3 job gate; branch protection attiva; build Tauri multi-OS fix CMake audiopus_sys (rev.8) |
+| Test (Rust / FE / signaler) | — | 30 / 25 / 53 | **36 / 25 / 69** | ▲ jitter, auth/turn, device list |
 | **Maturità complessiva** | **7.5/10** | ~7.6/10 | **~8.0/10** | ▲ P1+P2 chiusi; resta solo l'E2E audio reale |
 
 **Verdetto aggiornato (rev. 3):** dalla rev.2 un secondo intervento ha chiuso **P1**
@@ -177,9 +177,10 @@ GitNexus reindex OK (778 nodi / 1221 archi / 26 cluster / 23 flussi).
 | Stack produzione | `Caddyfile` (wss→ws 127.0.0.1:8080) + `docker-compose.prod.yml` (signaler+caddy+coturn) + `.env.example`. Client Rust accetta `wss://` (`tokio-tungstenite` + `native-tls`). | ✅ Presente. ⚠️ Mai deployato/integration-testato end-to-end (Caddy+coturn reali). |
 
 **Gap residui individuati in review (non bloccanti, vedi §9):** (a) nessun test E2E che il
-client Rust mandi davvero `token` e si colleghi via `wss://`; (b) jitter buffer validato solo
-in unit, non sotto jitter di rete reale; (c) RTT stats potenzialmente vuoto (sopra);
-(d) `run_backend` ancora monolitico. **Nota processo:** i commit della sessione hardening
+client Rust mandi davvero `token` e si colleghi via `wss://` (smoke script + integrazione
+room-auth/TURN coprono la logica server-side); (b) jitter buffer validato solo
+in unit, non sotto jitter di rete reale; (c) RTT stats: fallback `candidate-pair` aggiunto
+(rev.6); (d) ~~`run_backend` monolitico~~ estratto in `backend.rs` (rev.6). **Nota processo:** i commit della sessione hardening
 includono `Co-authored-by: Cursor` — i miei commit, su richiesta, non portano coautore.
 
 ---
@@ -396,8 +397,9 @@ Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni
    Forwarding Unit (es. mediasoup/LiveKit) — cambio architetturale, non incrementale.
 8. **Audio device picker** (oggi si usa solo il default cpal) e **code signing** dei
    bundle (oggi le build non sono firmate → warning OS all'avvio).
-   **Stato (parziale rev.7):** `list_audio_devices` + display read-only in SettingsPanel;
-   hot-swap dispositivo a runtime non ancora implementato.
+   **Stato (parziale rev.7–8):** `list_audio_devices` + display read-only in SettingsPanel;
+   hot-swap dispositivo a runtime non ancora implementato. Guida code signing in
+   `docs/process/CODE-SIGNING.md`; CI Tauri accetta `TAURI_SIGNING_*` secrets.
 
 ### Debito di processo (lezione della rev.2)
 9. **La CI deve essere il gate, non la documentazione.** Il gap che ha permesso a `main`

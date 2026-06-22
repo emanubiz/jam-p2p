@@ -225,6 +225,8 @@ jobs:
       - name: Build Tauri app (release)
         run: npm run tauri build
         env:
+          # audiopus_sys → bundled libopus CMakeLists requires policy floor on CI runners
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 

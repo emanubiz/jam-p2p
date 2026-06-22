@@ -1,0 +1,5 @@
+# audiopus_sys bundles libopus with an old CMakeLists.txt (cmake_minimum_required < 3.5).
+# CMake 4.x rejects that unless this policy floor is set — breaks Tauri release builds on
+# GitHub Actions (macOS/Windows runners, 2026).
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
