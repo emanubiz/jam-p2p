@@ -232,6 +232,7 @@ impl PeerManager {
         for (pid, pc) in &self.peers {
             let stats = pc.get_stats().await;
             let mut rtt_ms: Option<f64> = None;
+            let mut candidate_pair_rtt_ms: Option<f64> = None;
             let mut packets_lost: i64 = 0;
             let mut bytes_received: u64 = 0;
             let mut bytes_sent: u64 = 0;
@@ -250,8 +251,17 @@ impl PeerManager {
                     StatsReportType::OutboundRTP(s) if s.kind == "audio" => {
                         bytes_sent = s.bytes_sent;
                     }
+                    StatsReportType::CandidatePair(s)
+                        if s.nominated && s.current_round_trip_time > 0.0 =>
+                    {
+                        candidate_pair_rtt_ms = Some(s.current_round_trip_time * 1000.0);
+                    }
                     _ => {}
                 }
+            }
+
+            if rtt_ms.is_none() {
+                rtt_ms = candidate_pair_rtt_ms;
             }
 
             if let Some(rtt) = rtt_ms {

@@ -362,7 +362,7 @@ GitHub Actions pipeline (`.github/workflows/build.yml`) runs on every push and p
 
 - **Frontend test job**: Vitest + ESLint + TypeScript typecheck on `ubuntu-latest`
 - **Rust test job**: `cargo test --bins` (35 unit tests), `cargo fmt --check`, `cargo clippy -D warnings` (with the `pedantic` group advisory via `-A clippy::pedantic`), `cargo audit`
-- **Signaling smoke job**: Jest unit + in-process integration tests (63) + standalone `node server.js` boot with HTTP `/health` and `/ice-servers` smoke
+- **Signaling smoke job**: Jest unit + in-process integration tests (67) + standalone `node server.js` boot with HTTP `/health` and `/ice-servers` smoke
 - **Build matrix**: Tauri release build on Linux (`.deb`, `.AppImage`, `.rpm`), macOS Apple Silicon (`.dmg`), Windows (`.msi`, `.exe`)
 - **Release**: tags matching `v*` produce a GitHub Release with all platform artifacts attached
 
