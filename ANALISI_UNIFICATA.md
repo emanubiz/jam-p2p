@@ -7,7 +7,7 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 5) · **HEAD:** `094aac1`
+> **Data:** 2026-06-22 (rev. 6) · **HEAD:** (pending commit)
 > **GitNexus (reindex rev.5):** 780 nodi, 1223 archi, 26 cluster, 23 execution flow
 > **Test eseguiti (rev. 5):** frontend **25/25** Vitest ·
 > signaling **69/69** Jest (57 unit + 10 integrazione + 4 room-auth + 2 TURN REST) · Rust **35/35**
@@ -306,7 +306,7 @@ di Phase 9 in modo completo.
 Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni voce:
 *perché serve* e *come* realizzarla in concreto in questo codebase.
 
-### 🔴 P0 — Verifica E2E audio su hardware (UNICO blocco reale rimasto)
+### 🔴 P0 — Verifica E2E audio su hardware — **escluso per decisione proprietario (2026-06-22)**
 - **Perché:** è l'unica cosa che non si può verificare a tavolino. Il design ora è corretto
   (RTP inviato via task async; decode→jitter buffer→mixer), ma nessuno ha ancora sentito
   audio uscire da due macchine reali. Finché non accade, Phase 8 = "audio non confermato".
@@ -319,10 +319,11 @@ Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni
   3. **RTT popolato** — verificare che `peer-stats.rttMs` non sia sempre `null`; se lo è,
      `webrtc-rs` non riempie `RemoteInboundRTP.round_trip_time` e va stimato altrimenti
      (es. da `candidate-pair`), vedi §2-ter.
-- **Stato:** prerequisiti automatizzati verificati (build/clippy/35 test Rust, 63 signaler,
-  25 FE, GitNexus). Mitigazione stutter implementata. Esito in
-  `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md` — **playback bidirezionale ancora pending**
-  (richiede operatore umano + 2 device audio; non eseguibile in CI/headless).
+- **Stato:** prerequisiti automatizzati verificati (build/clippy/35 test Rust, 69 signaler,
+  25 FE). Mitigazione stutter implementata. **Playback bidirezionale su hardware reale
+  escluso** dalla roadmap operativa del proprietario (non eseguibile in CI; decisione
+  esplicita 2026-06-22). Esito documentato in
+  `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md` — status **DEFERRED**.
 - **Esito atteso:** RTT 60–160 ms, VU bidirezionali, nessun glitch, `peers:0` a fine sessione.
 
 ### ✅ P0.5 — Validazione del path di rete sicuro (segue P0, prima del deploy)
@@ -386,8 +387,10 @@ Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni
 ### 🟢 P3 — Refactor e piattaforma (rimandabili)
 6. **`webrtc.rs` `handle_signal` / `run_backend` lunghi** (P2.2): estrarre i rami
    Offer/Answer/Ice in funzioni dedicate. Basso rischio, alta leggibilità.
-   **Stato (parziale 2026-06-22):** estratti `handle_peer_list`, `handle_incoming_offer`,
-   `handle_incoming_answer`, `handle_incoming_ice`. `run_backend` ancora monolitico.
+   **Stato (parziale 2026-06-22, rev.6):** estratti `handle_peer_list`, `handle_incoming_offer`,
+   `handle_incoming_answer`, `handle_incoming_ice` in `webrtc.rs`; `run_backend` spostato in
+   `backend.rs` con `BackendSession` e handler dedicati (`handle_app_command`,
+   `handle_ws_inbound`, `handle_ws_disconnect`). `main.rs` ridotto a bootstrap Tauri.
 7. **SFU per >6 peer** (A3): la mesh è O(N²). Per sessioni grandi serve un Selective
    Forwarding Unit (es. mediasoup/LiveKit) — cambio architetturale, non incrementale.
 8. **Audio device picker** (oggi si usa solo il default cpal) e **code signing** dei
@@ -398,6 +401,8 @@ Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni
    di non compilare è che nessun controllo *eseguibile* girava prima del merge. Ora che
    la pipeline è verde, proteggere `main` con i check richiesti (branch protection) e
    non fidarsi mai di un'analisi puramente statica per affermare che "il codice funziona".
+   **Stato (2026-06-22):** branch protection attiva su `main` — richiede
+   `Frontend tests (vitest + lint)`, `Rust unit tests`, `Signaling server smoke test`.
 
 ---
 

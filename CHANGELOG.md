@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Backend refactor + branch protection (2026-06-22)
+
+- **P3 (partial):** extract `run_backend` from `main.rs` into `backend.rs` with
+  `BackendSession` and dedicated handlers for app commands, WS inbound, and reconnect.
+- **Process:** enable branch protection on `main` (3 required CI checks, enforce admins).
+- **P0:** E2E audio on real hardware marked **DEFERRED** per owner decision.
+
 ### P0.5 secure path — TURN integration + dev stack (2026-06-22)
 
 - **TURN REST integration tests:** `/ice-servers` and Welcome emit ephemeral coturn
