@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### CI — fix Tauri release build (audiopus_sys CMake) (2026-06-22)
+
+- Set `CMAKE_POLICY_VERSION_MINIMUM=3.5` for bundled libopus build on GitHub Actions
+  (macOS/Windows runners with CMake 4.x).
+- Add `docs/process/CODE-SIGNING.md` with platform signing guidance.
+
 ### Audio device listing + P0.5 smoke script (2026-06-22)
 
 - **P3 (partial):** `list_audio_devices` Tauri command; SettingsPanel shows active
