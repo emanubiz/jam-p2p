@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Audio encoder — mpsc RTP decoupling (2026-06-22)
+
+- **Decoupled encode from network send:** the Opus encoder thread now pushes
+  encoded frames into a bounded `tokio::sync::mpsc` channel (32 slots ≈ 640 ms);
+  a dedicated async task calls `track.write_rtp().await`. Replaces the interim
+  `rt.block_on(write_rtp)` fix (B3), eliminating per-frame blocking on slow sends.
+- **E2E audio status:** infrastructure prerequisites verified; bidirectional playback
+  steps remain pending — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`.
+
 ### CI pipeline repair + signaling integration tests (2026-06-22)
 
 The CI had been **red on every commit**. Three independent breakages were diagnosed

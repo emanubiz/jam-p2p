@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use parking_lot::Mutex;
 use ringbuf::{
@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 use crate::config::{DEFAULT_OPUS_BITRATE, FRAME_SIZE_MS, RING_BUFFER_SIZE_MULT, RTP_PAYLOAD_TYPE};
 use ::webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
@@ -162,6 +162,17 @@ pub fn init_audio() -> Result<AudioDevice> {
     })
 }
 
+/// One encoded Opus frame ready for RTP transmission.
+struct RtpFrame {
+    seq: u16,
+    timestamp: u32,
+    payload: Bytes,
+}
+
+/// Backpressure for the encoder→RTP path. At 20 ms frames, 32 slots ≈ 640 ms
+/// of headroom before the encoder must wait on a slow network send.
+const RTP_OUTBOUND_CHANNEL_CAP: usize = 32;
+
 pub struct EncoderHandle {
     shutdown_tx: watch::Sender<bool>,
 }
@@ -181,14 +192,27 @@ pub fn start_encoder_thread(
     handle: AppHandle,
 ) -> EncoderHandle {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let (rtp_tx, mut rtp_rx) = mpsc::channel::<RtpFrame>(RTP_OUTBOUND_CHANNEL_CAP);
 
-    // The encoder runs on a dedicated OS thread so the blocking Opus encode and
-    // the 1 ms mic-drain spin never touch the tokio runtime. Capture a runtime
-    // handle now — while we are still inside run_backend's runtime — so the
-    // thread can drive the async `track.write_rtp` to completion. Without this
-    // the RTP future was constructed and immediately dropped (`let _ = ...`), so
-    // no Opus packet was ever actually sent on the wire.
-    let rt = tokio::runtime::Handle::current();
+    // Dedicated async sender: encode stays on the OS thread; `write_rtp().await`
+    // runs here so a slow network send cannot block the encoder loop via
+    // `block_on` (which caused stutter risk at 20 ms cadence).
+    tokio::spawn(async move {
+        while let Some(frame) = rtp_rx.recv().await {
+            let _ = track
+                .write_rtp(&webrtc::rtp::packet::Packet {
+                    header: webrtc::rtp::header::Header {
+                        payload_type: RTP_PAYLOAD_TYPE,
+                        sequence_number: frame.seq,
+                        timestamp: frame.timestamp,
+                        ..Default::default()
+                    },
+                    payload: frame.payload,
+                })
+                .await;
+        }
+        tracing::debug!("RTP outbound task finished");
+    });
 
     thread::spawn(move || {
         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -242,15 +266,17 @@ pub fn start_encoder_thread(
                     packet_buf.clear();
                     packet_buf.extend_from_slice(&out_buf[..len]);
                     let payload = packet_buf.split().freeze();
-                    let _ = rt.block_on(track.write_rtp(&webrtc::rtp::packet::Packet {
-                        header: webrtc::rtp::header::Header {
-                            payload_type: RTP_PAYLOAD_TYPE,
-                            sequence_number: seq,
+                    if rtp_tx
+                        .blocking_send(RtpFrame {
+                            seq,
                             timestamp,
-                            ..Default::default()
-                        },
-                        payload,
-                    }));
+                            payload,
+                        })
+                        .is_err()
+                    {
+                        tracing::debug!("RTP outbound channel closed; stopping encoder");
+                        return;
+                    }
 
                     let level = compute_audio_level(&pcm_buf, prev_level);
                     prev_level = level;
