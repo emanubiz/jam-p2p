@@ -8,24 +8,28 @@ mod signaling;
 mod state;
 mod webrtc;
 
+use ::webrtc::api::media_engine::MediaEngine;
+use ::webrtc::api::APIBuilder;
 use anyhow::Result;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::mpsc;
-use ::webrtc::api::media_engine::MediaEngine;
-use ::webrtc::api::APIBuilder;
 
-use crate::audio::{init_audio, start_encoder_thread, EncoderHandle};
+use crate::audio::{init_audio, start_encoder_thread};
 use crate::config::default_ice_servers;
 use crate::logger::init_tracing;
 use crate::messages::{AppCommand, SignalMessage, WsEvent};
 use crate::signaling::SignalingClient;
-use tokio::sync::watch;
 use crate::state::init_state;
 use crate::webrtc::{PeerManager, WebrtcContext};
+use tokio::sync::watch;
 
+// Startup is fatal-or-nothing: if the tokio runtime or the Tauri event loop
+// cannot be created there is no meaningful recovery, so `expect` (which the
+// project otherwise lints against) is the correct choice here.
+#[allow(clippy::expect_used)]
 fn main() {
     init_tracing();
     // Bounded channels give backpressure: if a producer outruns a consumer
@@ -47,8 +51,7 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new()
-                    .expect("failed to create tokio runtime");
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
                 rt.block_on(async move {
                     if let Err(e) = run_backend(handle, backend_state, rx, shutdown_rx).await {
                         tracing::error!("Backend error: {:?}", e);
@@ -63,7 +66,12 @@ fn main() {
     let _ = shutdown_tx.send(true);
 }
 
-async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut rx: mpsc::Receiver<AppCommand>, mut shutdown_rx: watch::Receiver<bool>) -> Result<()> {
+async fn run_backend(
+    handle: tauri::AppHandle,
+    backend: state::BackendState,
+    mut rx: mpsc::Receiver<AppCommand>,
+    mut shutdown_rx: watch::Receiver<bool>,
+) -> Result<()> {
     let audio = init_audio()?;
     let mixer_sources = audio.mixer_sources.clone();
 
@@ -87,8 +95,7 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
     // parking_lot::Mutex (no PoisonError): the real-time audio callback in
     // audio.rs holds the mixer lock via `try_lock`, and the shutdown path
     // never poisons the mutex.
-    let saved_volumes: Arc<Mutex<Vec<(String, f32)>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    let saved_volumes: Arc<Mutex<Vec<(String, f32)>>> = Arc::new(Mutex::new(Vec::new()));
 
     let encoder_handle = start_encoder_thread(
         local_track.clone(),
@@ -114,7 +121,8 @@ async fn run_backend(handle: tauri::AppHandle, backend: state::BackendState, mut
     };
 
     let mut peer_manager = PeerManager::new(ice_servers);
-    let mut sig_client = SignalingClient::new(ws_in_tx, sig_tx.clone(), ws_event_tx, shutdown_rx.clone());
+    let mut sig_client =
+        SignalingClient::new(ws_in_tx, sig_tx.clone(), ws_event_tx, shutdown_rx.clone());
     let mut my_id: Option<String> = None;
 
     loop {

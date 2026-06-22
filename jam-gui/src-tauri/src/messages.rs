@@ -160,7 +160,8 @@ mod signal_tests {
 
     #[test]
     fn peer_list_with_names() {
-        let json = r#"{"type":"PeerList","data":{"peers":[{"uuid":"a","name":"Alice"},{"uuid":"b"}]}}"#;
+        let json =
+            r#"{"type":"PeerList","data":{"peers":[{"uuid":"a","name":"Alice"},{"uuid":"b"}]}}"#;
         let msg: SignalMessage = serde_json::from_str(json).unwrap();
         match msg {
             SignalMessage::PeerList { peers } => {
@@ -207,7 +208,7 @@ mod signal_tests {
         let json = r#"{"type":"Error","data":{"message":"Room is full"}}"#;
         let msg: SignalMessage = serde_json::from_str(json).unwrap();
         match msg {
-            SignalMessage::Error { message } => assert_eq!(message, "Room is full"),
+            SignalMessage::Error { ref message } => assert_eq!(message, "Room is full"),
             _ => panic!("wrong variant"),
         }
         let back = serde_json::to_string(&msg).unwrap();
