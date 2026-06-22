@@ -304,9 +304,9 @@ cd jam-gui/src-tauri && cargo test
 
 ### Test Coverage
 
-- **Rust**: 30 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN/Inf safety, clipping, extreme values, convergence) and Opus sample-rate selection (`pick_common_opus_rate`), plus 7 serde wire-protocol round-trip tests
-- **Frontend**: 24 Vitest tests — rendering (logo, connection form, inputs, component structure, display-name label), interaction tests (connect/join, error surfacing, mute toggle, disconnect, bitrate change), and analytics-panel tests (duration formatting, stats, collapsed state)
-- **Signaling**: 53 Jest tests — 43 unit (`lib/__tests__/`: validation, rate-limit, rooms) + 10 in-process integration (`__tests__/server.integration.test.js`: boots the real `server.js` and drives it with `ws` clients — handshake, room join/discovery, Offer/Answer/Ice relay, Leave + hard-disconnect `PeerLeft`, per-room cap, malformed-message robustness, HTTP API)
+- **Rust**: 35 unit tests covering audio level computation (silence, full-scale, EMA smoothing, NaN/Inf safety, clipping, extreme values, convergence), Opus sample-rate selection (`pick_common_opus_rate`), the adaptive jitter buffer (`jitter_buffer.rs`), plus 7 serde wire-protocol round-trip tests
+- **Frontend**: 25 Vitest tests — rendering (logo, connection form, inputs, component structure, display-name label), interaction tests (connect/join, error surfacing, mute toggle, disconnect, bitrate change), and analytics-panel tests (duration formatting, network stats, collapsed state)
+- **Signaling**: 63 Jest tests — unit (`lib/__tests__/`: validation, rate-limit, rooms, room-auth, turn-credentials) + 10 in-process integration (`__tests__/server.integration.test.js`: boots the real `server.js` and drives it with `ws` clients — handshake, room join/discovery, Offer/Answer/Ice relay, Leave + hard-disconnect `PeerLeft`, per-room cap, malformed-message robustness, HTTP API)
 
 ---
 
