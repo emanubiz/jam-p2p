@@ -7,10 +7,10 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 6) · **HEAD:** `f3de9b0`
-> **GitNexus (reindex rev.5):** 780 nodi, 1223 archi, 26 cluster, 23 execution flow
-> **Test eseguiti (rev. 5):** frontend **25/25** Vitest ·
-> signaling **69/69** Jest (57 unit + 10 integrazione + 4 room-auth + 2 TURN REST) · Rust **35/35**
+> **Data:** 2026-06-22 (rev. 7) · **HEAD:** `be7c650`
+> **GitNexus (reindex rev.7):** 816 nodi, 1302 archi, 27 cluster, 23 execution flow
+> **Test eseguiti (rev. 7):** frontend **25/25** Vitest ·
+> signaling **69/69** Jest · Rust **36/36**
 > `cargo test` · `cargo clippy -D warnings -A pedantic` 0 warning · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
 
 ---
@@ -67,7 +67,7 @@ commit `9cbe76a`, **prima** che il piano d'azione fosse eseguito. Questo documen
 | Sicurezza | 6.5/10 | 7.5/10 | **8.0/10** | ▲ room auth HMAC e TURN REST ora **implementati e unit-testati**, non solo "ready" |
 | Ottimizzazione | 7.7/10 | 8.0/10 | **8.5/10** | ▲ encoder→RTP via mpsc (niente più `block_on` per-frame) + jitter buffer adattivo |
 | Build Rust | (non testata) | OK | **OK** | verde, ri-verificata in rev.3 |
-| Tooling / CI | — | 6.5/10 | **7.0/10** | verde su tutti i job non-hardware; manca branch protection |
+| Tooling / CI | — | 6.5/10 | **7.5/10** | verde sui 3 job gate; branch protection attiva; build Tauri multi-OS ancora flaky |
 | Test (Rust / FE / signaler) | — | 30 / 25 / 53 | **35 / 25 / 63** | ▲ +5 jitter, +10 auth/turn/validation |
 | **Maturità complessiva** | **7.5/10** | ~7.6/10 | **~8.0/10** | ▲ P1+P2 chiusi; resta solo l'E2E audio reale |
 
@@ -339,8 +339,9 @@ Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni
   (2 casi: `/ice-servers` + Welcome con credenziali effimere, no openrelay). RTT fallback da
   `CandidatePair` nominato. Stack **secure-dev** aggiunto (`docker-compose.secure-dev.yml` +
   `Caddyfile.secure-dev`, coturn con port mapping — funziona su Docker Desktop Windows).
-  Procedura manuale in `docs/testing/P0.5-SECURE-PATH-PROCEDURE.md`. Deploy docker end-to-end
-  **non eseguito** in questa sessione (Docker daemon non avviato sulla workstation).
+  Procedura manuale in `docs/testing/P0.5-SECURE-PATH-PROCEDURE.md`. Script smoke
+  `docs/testing/scripts/p0.5-secure-dev-smoke.ps1` (richiede Docker Desktop avviato).
+  Deploy docker end-to-end **non eseguito** in agent session (daemon non avviato).
 
 ### 🟠 P1 — Hardening di rete (produzione) — **implementato 2026-06-22**
 1. **WSS/TLS sul signaling.** *Perché:* oggi SDP/ICE viaggiano in chiaro (MITM in rete
@@ -395,6 +396,8 @@ Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni
    Forwarding Unit (es. mediasoup/LiveKit) — cambio architetturale, non incrementale.
 8. **Audio device picker** (oggi si usa solo il default cpal) e **code signing** dei
    bundle (oggi le build non sono firmate → warning OS all'avvio).
+   **Stato (parziale rev.7):** `list_audio_devices` + display read-only in SettingsPanel;
+   hot-swap dispositivo a runtime non ancora implementato.
 
 ### Debito di processo (lezione della rev.2)
 9. **La CI deve essere il gate, non la documentazione.** Il gap che ha permesso a `main`

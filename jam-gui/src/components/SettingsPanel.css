@@ -10,7 +10,7 @@
 }
 
 .settings-panel.open {
-  max-height: 200px;
+  max-height: 320px;
   padding: 16px 20px;
 }
 
@@ -82,4 +82,38 @@
   border-radius: 50%;
   cursor: pointer;
   border: none;
+}
+
+.settings-devices {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.device-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: #d1d5db;
+}
+
+.device-kind {
+  min-width: 28px;
+  color: #6b7280;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.device-name {
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.4;
 }
