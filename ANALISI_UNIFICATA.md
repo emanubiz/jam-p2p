@@ -7,10 +7,10 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 3) · **HEAD:** `8c48eb0`
+> **Data:** 2026-06-22 (rev. 4) · **HEAD:** (pending commit)
 > **GitNexus (reindex rev.3):** 778 nodi, 1221 archi, 26 cluster, 23 execution flow
-> **Test eseguiti (rev. 3, dopo sessione hardening):** frontend **25/25** Vitest ·
-> signaling **63/63** Jest (53 unit + 10 integrazione in-process) · Rust **35/35**
+> **Test eseguiti (rev. 4):** frontend **25/25** Vitest ·
+> signaling **67/67** Jest (57 unit + 10 integrazione + 4 room-auth) · Rust **35/35**
 > `cargo test` · `cargo clippy -D warnings -A pedantic` 0 warning · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
 
 ---
@@ -334,6 +334,12 @@ Sintesi prioritizzata, **aggiornata rev.3** (P1 e P2 ora implementati). Per ogni
   un token preso da `GET /room/:name/token`; (3) forzare il relay TURN (bloccando l'host-host)
   e confermare dal log coturn che le credenziali effimere sono accettate. Aggiungere un test
   d'integrazione signaler: `Join` senza token con `ROOM_AUTH_SECRET` attivo → `Error`.
+- **Stato (parziale 2026-06-22):** test d'integrazione room-auth aggiunti
+  (`server.room-auth.integration.test.js`, 4 casi: token mint, join senza token → Error,
+  join con token valido, token room sbagliata). RTT fallback da `CandidatePair` nominato
+  quando `RemoteInboundRTP.round_trip_time` è `None`. Deploy docker+Caddy+coturn end-to-end
+  ancora pending (richiede host Linux/macOS — `network_mode: host` di coturn non funziona
+  su Docker Desktop Windows).
 
 ### 🟠 P1 — Hardening di rete (produzione) — **implementato 2026-06-22**
 1. **WSS/TLS sul signaling.** *Perché:* oggi SDP/ICE viaggiano in chiaro (MITM in rete

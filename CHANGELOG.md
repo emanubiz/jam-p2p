@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Room auth integration + RTT fallback (2026-06-22)
+
+- **P0.5 (partial):** in-process integration tests for `ROOM_AUTH_SECRET` — Join without
+  token returns `Error`; valid token from `GET /room/:name/token` allows peer discovery.
+- **RTT stats:** fall back to nominated ICE `candidate-pair` RTT when
+  `RemoteInboundRTP.round_trip_time` is unset (common in webrtc-rs).
+- **Tests:** signaler **67** (+4 room-auth integration).
+
 ### Audio encoder — mpsc RTP decoupling (2026-06-22)
 
 - **Decoupled encode from network send:** the Opus encoder thread now pushes
