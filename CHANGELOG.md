@@ -16,6 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **E2E audio status:** infrastructure prerequisites verified; bidirectional playback
   steps remain pending — see `docs/testing/E2E-AUDIO-RESULTS-2026-06-22.md`.
 
+### Network hardening — WSS, room auth, own TURN (2026-06-22)
+
+- **Room authentication (opt-in):** `ROOM_AUTH_SECRET` enables HMAC tokens via
+  `GET /room/:name/token`; Join verifies signature before admitting peers. Frontend
+  fetches token automatically; Rust wire protocol extended with optional `token` field.
+- **Dynamic TURN credentials:** when `TURN_SECRET` + `TURN_URLS` are set, Welcome and
+  `/ice-servers` emit coturn-compatible REST credentials instead of static openrelay.
+- **WSS/TLS:** `tokio-tungstenite` built with `native-tls` for `wss://` clients;
+  `jam-signaler/Caddyfile` + `docker-compose.prod.yml` terminate TLS via Caddy reverse
+  proxy to the Node signaler.
+- **Tests:** +10 Jest (room-auth, turn-credentials, validation token cases); signaling
+  total **63** (53 + 10).
+
 ### CI pipeline repair + signaling integration tests (2026-06-22)
 
 The CI had been **red on every commit**. Three independent breakages were diagnosed

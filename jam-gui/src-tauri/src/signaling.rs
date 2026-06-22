@@ -24,6 +24,7 @@ pub struct SignalingClient {
     pub sig_tx: mpsc::Sender<SignalMessage>,
     pub ws_event_tx: mpsc::Sender<WsEvent>,
     pub last_join: Option<(String, String, String)>,
+    pub last_token: Option<crate::messages::RoomToken>,
     pub reconnect_delay: u64,
     shutdown_rx: watch::Receiver<bool>,
 }
@@ -41,6 +42,7 @@ impl SignalingClient {
             sig_tx,
             ws_event_tx,
             last_join: None,
+            last_token: None,
             reconnect_delay: RECONNECT_BASE_DELAY_MS,
             shutdown_rx,
         }
@@ -51,6 +53,7 @@ impl SignalingClient {
         server: &str,
         room: &str,
         name: &str,
+        token: Option<crate::messages::RoomToken>,
         res_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     ) {
         tracing::info!("Connecting to {} room {}", server, room);
@@ -59,6 +62,7 @@ impl SignalingClient {
                 tracing::info!("Connected to signaling server");
                 self.reconnect_delay = RECONNECT_BASE_DELAY_MS;
                 self.last_join = Some((server.to_string(), room.to_string(), name.to_string()));
+                self.last_token = token.clone();
                 let (write, mut read) = ws.split();
                 let ws_in_tx = self.ws_in_tx.clone();
                 let ws_event_tx = self.ws_event_tx.clone();
@@ -97,6 +101,7 @@ impl SignalingClient {
                     .send(SignalMessage::Join {
                         room: room.to_string(),
                         name: name.to_string(),
+                        token,
                     })
                     .await;
                 let _ = res_tx.send(Ok(()));
@@ -118,6 +123,7 @@ impl SignalingClient {
     pub async fn leave(&mut self) {
         tracing::info!("Leaving room");
         self.last_join = None;
+        self.last_token = None;
         if let Some(mut ws) = self.ws_sender.take() {
             use futures::SinkExt;
             let _ = ws.close().await;

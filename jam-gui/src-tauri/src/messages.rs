@@ -18,6 +18,13 @@ pub struct IceServerConfig {
     pub credential: String,
 }
 
+/// HMAC room token from GET /room/:name/token (when ROOM_AUTH_SECRET is set).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RoomToken {
+    pub exp: u64,
+    pub sig: String,
+}
+
 /// A peer entry in a `PeerList`, carrying its display name.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PeerInfo {
@@ -37,6 +44,8 @@ pub enum SignalMessage {
     Join {
         room: String,
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<RoomToken>,
     },
     PeerList {
         peers: Vec<PeerInfo>,
@@ -76,6 +85,7 @@ pub enum AppCommand {
         room: String,
         name: String,
         server: String,
+        token: Option<crate::messages::RoomToken>,
         res_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     Leave {

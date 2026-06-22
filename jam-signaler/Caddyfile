@@ -1,0 +1,9 @@
+# Replace with your public hostname. Caddy obtains a Let's Encrypt certificate
+# automatically when the domain resolves to this host.
+#
+# Local dev with self-signed TLS:
+#   localhost { tls internal; reverse_proxy jam-signaler:8080 }
+
+{$SIGNALING_DOMAIN:localhost} {
+	reverse_proxy jam-signaler:8080
+}

@@ -1,0 +1,59 @@
+# Production stack: signaling + coturn + TLS reverse proxy.
+#
+# Usage:
+#   cp .env.example .env
+#   # set ROOM_AUTH_SECRET, TURN_SECRET, and your domain in Caddyfile
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# The signaler listens on 8080 inside the network; Caddy terminates TLS and
+# exposes wss:// on :443. Point the Tauri client at wss://your.domain.
+
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: jam-coturn
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=jam-p2p
+      - --listening-port=3478
+      - --min-port=49152
+      - --max-port=65535
+
+  jam-signaler:
+    build: .
+    container_name: jam-signaler
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - LOG_LEVEL=info
+      - ALLOWED_ORIGIN=${ALLOWED_ORIGIN:-*}
+      - ROOM_AUTH_SECRET=${ROOM_AUTH_SECRET:-}
+      - TURN_SECRET=${TURN_SECRET:-}
+      - TURN_URLS=${TURN_URLS:-turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp}
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: jam-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - jam-signaler
+
+volumes:
+  caddy_data:
+  caddy_config:

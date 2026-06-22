@@ -8,6 +8,8 @@ const crypto = require('crypto');
 const { validateMessage } = require('./lib/validation');
 const { checkRateLimit, startRateLimitCleanup } = require('./lib/rate-limit');
 const { removePeerFromRoom } = require('./lib/rooms');
+const { createRoomToken, verifyRoomToken } = require('./lib/room-auth');
+const { buildIceServers } = require('./lib/turn-credentials');
 
 // ---------------------------------------------------------------------------
 // Configuration (env-overridable, safe dev defaults)
@@ -27,18 +29,34 @@ const MAX_PEERS_PER_ROOM = process.env.MAX_PEERS_PER_ROOM
 const MAX_ROOMS = process.env.MAX_ROOMS ? parseInt(process.env.MAX_ROOMS, 10) : 500;
 // CORS: lock down in production via ALLOWED_ORIGIN; defaults to '*' for local dev.
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+// Optional room auth: when set, Join must carry a valid HMAC token from GET /room/:name/token.
+const ROOM_AUTH_SECRET = process.env.ROOM_AUTH_SECRET || '';
+// Optional own TURN (coturn REST): when TURN_SECRET is set, /ice-servers emits ephemeral creds.
+const TURN_SECRET = process.env.TURN_SECRET || '';
+const TURN_URLS = process.env.TURN_URLS
+  ? process.env.TURN_URLS.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : [];
+// Dev fallback when no own TURN is configured.
+const STATIC_TURN =
+  TURN_SECRET.length > 0
+    ? []
+    : [
+        {
+          urls: ['turn:openrelay.metered.ca:80'],
+          username: 'openrelayproject',
+          credential: 'openrelay',
+        },
+      ];
 
-// ICE server configuration (STUN/TURN). `urls` is always an array so the
-// Rust client can deserialize it directly into webrtc-rs RTCIceServer.
-const ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302'] },
-  { urls: ['stun:stun1.l.google.com:19302'] },
-  {
-    urls: ['turn:openrelay.metered.ca:80'],
-    username: 'openrelayproject',
-    credential: 'openrelay',
-  },
-];
+function getIceServers() {
+  return buildIceServers({
+    turnUrls: TURN_URLS,
+    turnSecret: TURN_SECRET,
+    staticTurn: STATIC_TURN,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // In-memory state
@@ -89,6 +107,20 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
+  // GET /room/:name/token — mint an HMAC room token (requires ROOM_AUTH_SECRET)
+  const tokenMatch = req.url.match(/^\/room\/([^/]+)\/token$/);
+  if (tokenMatch) {
+    const roomName = decodeURIComponent(tokenMatch[1]);
+    if (!ROOM_AUTH_SECRET) {
+      res.writeHead(503);
+      res.end(JSON.stringify({ error: 'Room auth not configured' }));
+      return;
+    }
+    res.writeHead(200);
+    res.end(JSON.stringify({ token: createRoomToken(roomName, ROOM_AUTH_SECRET) }));
+    return;
+  }
+
   // GET /room/:name — room info
   const roomMatch = req.url.match(/^\/room\/([^/]+)$/);
   if (roomMatch) {
@@ -108,7 +140,7 @@ const httpServer = http.createServer((req, res) => {
 
   if (req.url === '/ice-servers') {
     res.writeHead(200);
-    res.end(JSON.stringify({ iceServers: ICE_SERVERS }));
+    res.end(JSON.stringify({ iceServers: getIceServers() }));
     return;
   }
 
@@ -208,7 +240,7 @@ wss.on('connection', (ws, req) => {
   ws.send(
     JSON.stringify({
       type: 'Welcome',
-      data: { uuid: userUuid, iceServers: ICE_SERVERS },
+      data: { uuid: userUuid, iceServers: getIceServers() },
     })
   );
 
@@ -250,6 +282,19 @@ wss.on('connection', (ws, req) => {
       case 'Join': {
         const { room } = message.data;
         displayName = typeof message.data.name === 'string' ? message.data.name : '';
+
+        if (
+          ROOM_AUTH_SECRET &&
+          !verifyRoomToken(room, message.data.token, ROOM_AUTH_SECRET)
+        ) {
+          ws.send(
+            JSON.stringify({
+              type: 'Error',
+              data: { message: 'Invalid or missing room token' },
+            })
+          );
+          break;
+        }
 
         // Re-Join without an explicit Leave: drop the previous room membership
         // first, otherwise the old room keeps a ghost entry for this socket.

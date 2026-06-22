@@ -78,6 +78,21 @@ describe('validateMessage', () => {
       expect(validateMessage({ type: 'Join', data: { room: 'r', name: 42 } })).toBe(false);
     });
 
+    test('accepts Join with optional room token', () => {
+      expect(
+        validateMessage({
+          type: 'Join',
+          data: { room: 'studio', name: 'Alice', token: { exp: 9999999999, sig: 'abc' } },
+        })
+      ).toBe(true);
+    });
+
+    test('rejects Join with malformed token', () => {
+      expect(
+        validateMessage({ type: 'Join', data: { room: 'r', token: { exp: 1 } } })
+      ).toBe(false);
+    });
+
     test('rejects Join with room longer than 64 chars', () => {
       const longRoom = 'A'.repeat(65);
       expect(validateMessage({ type: 'Join', data: { room: longRoom } })).toBe(false);

@@ -32,6 +32,7 @@ pub async fn join_room(
     room: String,
     name: String,
     server: String,
+    token: Option<crate::messages::RoomToken>,
 ) -> Result<(), String> {
     if state.connected.load(Ordering::SeqCst) {
         return Err("Already connected to a room. Leave first.".to_string());
@@ -46,6 +47,7 @@ pub async fn join_room(
             room,
             name,
             server,
+            token,
             res_tx,
         })
         .await
