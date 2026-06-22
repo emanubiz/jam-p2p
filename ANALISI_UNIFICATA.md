@@ -7,7 +7,7 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 5) · **HEAD:** `33678c9` (local, uncommitted P0.5 docs below)
+> **Data:** 2026-06-22 (rev. 5) · **HEAD:** `094aac1`
 > **GitNexus (reindex rev.5):** 780 nodi, 1223 archi, 26 cluster, 23 execution flow
 > **Test eseguiti (rev. 5):** frontend **25/25** Vitest ·
 > signaling **69/69** Jest (57 unit + 10 integrazione + 4 room-auth + 2 TURN REST) · Rust **35/35**
