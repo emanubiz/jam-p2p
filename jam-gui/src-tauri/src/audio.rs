@@ -23,6 +23,47 @@ use tauri::{AppHandle, Emitter};
 
 pub type MixerMap = HashMap<String, (AdaptiveJitterBuffer, f32)>;
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AudioDeviceEntry {
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AudioDeviceList {
+    pub inputs: Vec<AudioDeviceEntry>,
+    pub outputs: Vec<AudioDeviceEntry>,
+}
+
+/// Enumerate cpal input/output devices; marks which match the host default.
+pub fn list_audio_devices() -> Result<AudioDeviceList> {
+    let host = cpal::default_host();
+    let default_in = host.default_input_device().and_then(|d| d.name().ok());
+    let default_out = host.default_output_device().and_then(|d| d.name().ok());
+
+    let inputs: Vec<AudioDeviceEntry> = host
+        .input_devices()?
+        .filter_map(|d| {
+            d.name().ok().map(|name| AudioDeviceEntry {
+                is_default: default_in.as_ref() == Some(&name),
+                name,
+            })
+        })
+        .collect();
+
+    let outputs: Vec<AudioDeviceEntry> = host
+        .output_devices()?
+        .filter_map(|d| {
+            d.name().ok().map(|name| AudioDeviceEntry {
+                is_default: default_out.as_ref() == Some(&name),
+                name,
+            })
+        })
+        .collect();
+
+    Ok(AudioDeviceList { inputs, outputs })
+}
+
 pub struct AudioDevice {
     pub sample_rate: u32,
     pub samples_per_frame: usize,
@@ -551,5 +592,14 @@ mod tests {
             (0.0..=1.0).contains(&level),
             "empty buffer level should be in [0,1]"
         );
+    }
+
+    #[test]
+    fn test_list_audio_devices_structure() {
+        let list = list_audio_devices().unwrap_or_else(|e| {
+            panic!("cpal device enumeration failed: {e}");
+        });
+        assert!(list.inputs.iter().filter(|d| d.is_default).count() <= 1);
+        assert!(list.outputs.iter().filter(|d| d.is_default).count() <= 1);
     }
 }

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Audio device listing + P0.5 smoke script (2026-06-22)
+
+- **P3 (partial):** `list_audio_devices` Tauri command; SettingsPanel shows active
+  input/output (read-only; runtime device switch not yet implemented).
+- **P0.5:** PowerShell smoke script `docs/testing/scripts/p0.5-secure-dev-smoke.ps1`
+  for secure-dev docker stack (health, token mint, Caddy HTTPS, TURN creds).
+- **Tests:** Rust **36** (+1 device enumeration).
+
 ### Backend refactor + branch protection (2026-06-22)
 
 - **P3 (partial):** extract `run_backend` from `main.rs` into `backend.rs` with
