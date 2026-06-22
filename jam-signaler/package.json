@@ -5,7 +5,7 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "test": "jest --colors=false",
+    "test": "jest --colors=false --forceExit",
     "test:watch": "jest --watch",
     "start": "node server.js",
     "build": "ncc build server.js -o dist"
