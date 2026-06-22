@@ -7,8 +7,8 @@
 > Include l'**audit delle modifiche** (commit `ab55f2b`→`265edcd`) e la feature
 > **analytics**, non prevista dal piano originale.
 >
-> **Data:** 2026-06-22 (rev. 8) · **HEAD:** `be7c650` (pending CI fix commit)
-> **GitNexus (reindex rev.8):** 816 nodi, 1302 archi, 27 cluster, 23 execution flow
+> **Data:** 2026-06-22 (rev. 8) · **HEAD:** `d2ca654`
+> **GitNexus (reindex rev.8):** 831 nodi, 1326 archi, 27 cluster, 25 execution flow
 > **Test eseguiti (rev. 8):** frontend **25/25** Vitest ·
 > signaling **69/69** Jest · Rust **36/36**
 > `cargo test` · `cargo clippy -D warnings -A pedantic` 0 warning · `cargo fmt --check` OK · `tsc --noEmit` OK · `eslint` OK
