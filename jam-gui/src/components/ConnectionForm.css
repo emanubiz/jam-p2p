@@ -43,9 +43,9 @@
 }
 
 .input-field:focus {
-  border-color: rgba(139, 92, 246, 0.6);
-  background: rgba(139, 92, 246, 0.06);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+  border-color: rgba(201, 161, 107, 0.6);
+  background: rgba(201, 161, 107, 0.06);
+  box-shadow: 0 0 0 3px rgba(201, 161, 107, 0.15);
 }
 
 .input-field:disabled {
@@ -54,7 +54,7 @@
 }
 
 .connect-btn {
-  background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+  background: linear-gradient(135deg, #c9a16b 0%, #b87333 100%);
   border: none;
   border-radius: 8px;
   padding: 14px 24px;
@@ -73,7 +73,7 @@
 
 .connect-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+  box-shadow: 0 6px 20px rgba(201, 161, 107, 0.4);
 }
 
 .connect-btn.connecting {

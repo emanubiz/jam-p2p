@@ -22,7 +22,9 @@ body {
 /* Main Container */
 .app-container {
   min-height: 100vh;
-  background: #0a0a0a;
+  background:
+    radial-gradient(circle at 50% 0%, #241a12 0%, transparent 55%),
+    linear-gradient(160deg, #1a140d 0%, #14100b 55%, #0f0c08 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -31,22 +33,33 @@ body {
   overflow: hidden;
 }
 
-/* Animated Background */
+/* Subtle wood-grain texture instead of a tech grid */
 .bg-grid {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(139, 92, 246, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(139, 92, 246, 0.03) 1px, transparent 1px);
-  background-size: 50px 50px;
-  animation: gridMove 20s linear infinite;
+    repeating-linear-gradient(
+      90deg,
+      rgba(201, 161, 107, 0.018) 0px,
+      rgba(201, 161, 107, 0.018) 1px,
+      transparent 1px,
+      transparent 7px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(80, 52, 30, 0.05) 0px,
+      transparent 2px,
+      transparent 90px
+    );
+  animation: gridMove 60s linear infinite;
   pointer-events: none;
 }
 
+/* Warm candle-light glows, much softer than the original neon orbs */
 .glow-orb {
   position: absolute;
   pointer-events: none;
-  filter: blur(60px);
+  filter: blur(80px);
 }
 
 .glow-orb-1 {
@@ -54,8 +67,8 @@ body {
   left: 15%;
   width: 320px;
   height: 320px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.25) 0%, transparent 70%);
-  animation: float 12s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(201, 161, 107, 0.10) 0%, transparent 70%);
+  animation: float 18s ease-in-out infinite;
 }
 
 .glow-orb-2 {
@@ -63,8 +76,8 @@ body {
   right: 15%;
   width: 380px;
   height: 380px;
-  background: radial-gradient(circle, rgba(236, 72, 153, 0.2) 0%, transparent 70%);
-  animation: float 15s ease-in-out infinite reverse;
+  background: radial-gradient(circle, rgba(184, 115, 51, 0.08) 0%, transparent 70%);
+  animation: float 22s ease-in-out infinite reverse;
 }
 
 @keyframes gridMove {
@@ -106,9 +119,10 @@ body {
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(201, 161, 107, 0.06), rgba(80, 52, 30, 0.04));
+  border: 1px solid rgba(201, 161, 107, 0.18);
   border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(201, 161, 107, 0.12);
   position: relative;
   overflow: hidden;
 }
@@ -116,7 +130,7 @@ body {
 .logo-shimmer {
   position: absolute;
   inset: 0;
-  background: linear-gradient(110deg, transparent 30%, rgba(139, 92, 246, 0.15) 50%, transparent 70%);
+  background: linear-gradient(110deg, transparent 30%, rgba(201, 161, 107, 0.15) 50%, transparent 70%);
   animation: shimmer 3s ease-in-out infinite;
 }
 
@@ -126,10 +140,11 @@ body {
 }
 
 .logo-text {
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  font-family: "Georgia", "Iowan Old Style", "Times New Roman", serif;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  background: linear-gradient(135deg, #e3c08a 0%, #c9a16b 45%, #a06a35 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -143,13 +158,17 @@ body {
   text-transform: uppercase;
 }
 
-/* Main card */
+/* Main card — warm walnut panel */
 .main-card {
-  background: rgba(20, 20, 24, 0.7);
+  background:
+    linear-gradient(180deg, rgba(38, 29, 20, 0.78), rgba(26, 20, 13, 0.82));
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(201, 161, 107, 0.14);
   border-radius: 16px;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(201, 161, 107, 0.10);
   overflow: hidden;
   animation: fadeIn 0.4s ease-out;
 }
@@ -301,8 +320,8 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.25);
+  background: rgba(201, 161, 107, 0.1);
+  border: 1px solid rgba(201, 161, 107, 0.25);
   border-radius: 8px;
   margin-bottom: 16px;
   width: fit-content;
@@ -311,7 +330,7 @@ body {
 .room-badge-label {
   font-size: 10px;
   font-weight: 700;
-  color: #8b5cf6;
+  color: #c9a16b;
   letter-spacing: 0.1em;
 }
 
@@ -327,7 +346,7 @@ body {
   color: #a0a0b0;
   margin-left: 8px;
   padding-left: 8px;
-  border-left: 1px solid rgba(139, 92, 246, 0.3);
+  border-left: 1px solid rgba(201, 161, 107, 0.3);
 }
 
 /* Settings toggle (gear button) */
@@ -352,9 +371,9 @@ body {
 }
 
 .settings-toggle.open {
-  background: rgba(139, 92, 246, 0.15);
-  border-color: rgba(139, 92, 246, 0.4);
-  color: #8b5cf6;
+  background: rgba(201, 161, 107, 0.15);
+  border-color: rgba(201, 161, 107, 0.4);
+  color: #c9a16b;
 }
 
 /* Reconnecting panel */

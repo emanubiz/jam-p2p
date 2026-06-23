@@ -31,7 +31,7 @@
 }
 
 .settings-value {
-  color: #8b5cf6;
+  color: #c9a16b;
   font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
 }
 
@@ -65,7 +65,7 @@
   appearance: none;
   width: 16px;
   height: 16px;
-  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  background: linear-gradient(135deg, #c9a16b, #b87333);
   border-radius: 50%;
   cursor: pointer;
   transition: transform 0.15s ease;
@@ -78,7 +78,7 @@
 .bitrate-slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
-  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  background: linear-gradient(135deg, #c9a16b, #b87333);
   border-radius: 50%;
   cursor: pointer;
   border: none;

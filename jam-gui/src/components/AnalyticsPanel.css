@@ -19,8 +19,8 @@
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 8px;
-  background: rgba(139, 92, 246, 0.04);
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  background: rgba(201, 161, 107, 0.04);
+  border: 1px solid rgba(201, 161, 107, 0.2);
   border-radius: 12px;
   padding: 14px 16px;
 }
@@ -36,7 +36,7 @@
 .analytics-value {
   font-size: 18px;
   font-weight: 700;
-  color: #ec4899;
+  color: #b87333;
   line-height: 1.1;
   white-space: nowrap;
 }
